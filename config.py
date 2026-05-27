@@ -17,8 +17,6 @@ fuer eine low-level TCP-Verbindung
     'server_port': int, geoeffneter Port des Servers
 '''
 secrets = {
-    'ssid': 'IOT_WIFI_VLAN',
-    'pw': '',
     'server_ip': '192.168.2.109',
     'server_port': 12345,
     'sensor_id': 'Entwicklung',
@@ -30,3 +28,9 @@ secrets = {
     'server_url': 'https://database3.protronic-gmbh.de/query?database=PicoTelemetry',
     'server_url': 'http://10.19.28.29:3021/',
     }
+
+network_config = {
+    'ssid': 'IOT_WIFI',
+    'pw': '',
+    
+}

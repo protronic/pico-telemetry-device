@@ -36,13 +36,6 @@ from config import secrets
 
 ## Sensor Konfiguration
 sens_id=secrets['sensor_id']
-## Wi-Fi Konfiguration
-SSID = secrets['ssid']
-try:
-    PW = secrets['pw']
-except KeyError:
-    PW = ''
-network.country('DE')
 ## Server Konfiguration
 SERVER_URL = secrets['server_url']
 HOST = secrets['server_ip']
@@ -53,8 +46,8 @@ interval=secrets['interval'] #Data-Aquisition-Timer Interval [ms]
 rtc=machine.RTC()
 
 ## Initialize I2C communication
-#i2c = machine.I2C(id=0, scl=machine.Pin(5), sda=machine.Pin(4), freq=10000)
-i2c = machine.I2C(id=secrets['i2c_bus'], scl=machine.Pin(secrets['scl_pin']), sda=machine.Pin(secrets['sda_pin']), freq=10000)
+# i2c = machine.I2C(id=0, scl=machine.Pin(5), sda=machine.Pin(4), freq=10000)
+i2c = machine.I2C(int(secrets['i2c_bus']), scl=machine.Pin(secrets['scl_pin']), sda=machine.Pin(secrets['sda_pin']), freq=int(10000))
 ## Initialize BME280 sensor
 bme = BME280.BME280(i2c=i2c, osmode=3)
 # osmode: Temperature oversampling (3 => x4)
@@ -159,33 +152,6 @@ def blink_led(num_blinks):
             led.off()
             time.sleep(.28)
 
-def wlanConnect():
-    wlan = network.WLAN(network.STA_IF) #STA_IF -> Station, device behaves like Wi-Fi client connecting to existing network  #AP_IF -> Access Point, device acts like Wi-Fi hotspot, allowing to connect to it
-    if not wlan.isconnected():
-        wlan.config(pm = 0xa11140)  #to disable power saving mode
-        wlan.active(True)
-
-        # mac = wlan.config('mac')
-        # print("MAC:", ':'.join('{:02X}'.format(b) for b in mac))
-        # nets = wlan.scan()
-        # for n in nets:
-        #     print(n[0].decode(), '| RSSI:', n[3], '| Security:', n[4])
-
-        if PW == '':
-            wlan.connect(SSID)
-        else:
-            wlan.connect(SSID, PW)
-        time.sleep(1)
-        for i in range(40):
-            if wlan.status() < 0 or wlan.status() >= 3:
-                break
-            wdt.feed() # prevent wdt to restart the system
-            time.sleep(.25)
-    if wlan.isconnected():
-        netConfig = wlan.ifconfig()
-        return netConfig[0], wlan.isconnected(), wlan.status()
-    else:
-        return '', wlan.isconnected(), wlan.status()
 
 # Mapping CYW43 error codes to their descriptions
 CYW43_ERROR_CODES = {
@@ -215,9 +181,13 @@ async def pulse_led():
 
 wdt.feed() # prevent wdt to restart the system
 led.on()
-ipv4, wlan_isconnected, wlan_status = wlanConnect()
 led.off()
-if wlan_isconnected:
+
+isconnected = network.WLAN(network.STA_IF).isconnected()
+ipv4 = network.WLAN(network.STA_IF).ifconfig()[0]
+wlan_status = network.WLAN(network.STA_IF).status()
+
+if isconnected:
     print(rtc.datetime(), f'Connected to WLAN: {ipv4}')########################
     time.sleep(.5)
     blink_led(wlan_status)
@@ -226,12 +196,12 @@ if wlan_isconnected:
     rtc_isupdated = receive_time()
 
     if secrets['per_dataacq']:
-        data_timer = machine.Timer()
+        data_timer = machine.Timer(1)
         data_timer.init(period=interval, mode=machine.Timer.PERIODIC, callback=read_data)
     else:
-        data_timer = machine.Timer()
+        data_timer = machine.Timer(1)
         data_timer.init(period=interval, mode=machine.Timer.ONE_SHOT, callback=read_data)
-    rtc_update_timer = machine.Timer()
+    rtc_update_timer = machine.Timer(2)
     rtc_update_timer.init(period=2419200, mode=machine.Timer.PERIODIC, callback=update_rtc) # 28 days
 
     async def main_loop():
@@ -256,7 +226,6 @@ if wlan_isconnected:
 
     running = True
     asyncio.run(main())
-    
 else:
     print(rtc.datetime(), 'Failed WLAN-Connection:', CYW43_ERROR_CODES.get(wlan_status, "Unknown error code."))
     time.sleep(.5)

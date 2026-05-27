@@ -1,0 +1,4 @@
+micropython-stdlib-stubs==1.28.0.post5
+mpremote==1.28.0
+platformdirs==4.9.6
+pyserial==3.5
