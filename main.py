@@ -53,13 +53,14 @@ bme = BME280.BME280(i2c=i2c, osmode=3)
 # osmode: Temperature oversampling (3 => x4)
 # BME280 default address (I2C0): BME280_I2CADDR = 0x76
 
-## Enable the WDT with a timeout of 6s (1s is the minimum)
-wdt = machine.WDT(timeout=6000)
-
-## Use dummy WDT for testing without hardware watchdog
-# class _DummyWDT:
-#     def feed(self): pass
-# wdt = _DummyWDT()
+if secrets['use_wdt']:
+    ## Enable the WDT with a timeout of 6s (1s is the minimum)
+    wdt = machine.WDT(timeout=6000)
+else:
+    ## Use dummy WDT for testing without hardware watchdog
+    class _DummyWDT:
+        def feed(self): pass
+    wdt = _DummyWDT()
 
 def read_data(data_timer):
     try:
