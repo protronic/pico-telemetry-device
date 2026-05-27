@@ -16,6 +16,8 @@ fuer eine low-level TCP-Verbindung
     'server_ip': str, IPv4-Adresse des Servers
     'server_port': int, geoeffneter Port des Servers
 '''
+from wifi_pw import pw
+
 secrets = {
     'server_ip': '192.168.2.109',
     'server_port': 12345,
@@ -31,6 +33,5 @@ secrets = {
 
 network_config = {
     'ssid': 'IOT_WIFI',
-    'pw': '',
-    
+    'pw': pw,    
 }
