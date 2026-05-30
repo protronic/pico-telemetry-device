@@ -33,12 +33,16 @@ import urequests as ur  # für HTTP-Version
 #import BME280
 import bme280_self as BME280
 from config import secrets
+from thingsboard_sdk.tb_device_mqtt import TBDeviceMqttClient
+from micro_dotenv import load_dotenv, get_env
+
+## Load environment variables from .env file
+load_dotenv()
 
 ## Sensor Konfiguration
 sens_id=secrets['sensor_id']
 ## Server Konfiguration
 SERVER_URL = secrets['server_url']
-HOST = secrets['server_ip']
 PORT = secrets['server_port']
 
 led = machine.Pin("LED", machine.Pin.OUT)
@@ -172,6 +176,41 @@ async def pulse_led():
         await asyncio.sleep(.3)
         led.off()
         await asyncio.sleep(1.7)
+
+tb_client = None
+
+def rpc_handler(request_id, request_body):
+    if tb_client is None:
+        return
+    method = request_body.get('method')
+    params = request_body.get('params', {})
+    if method == 'uploadFile':
+        filename = params.get('filename', '')
+        content  = params.get('content', '')
+        if not filename:
+            tb_client.send_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
+            return
+        try:
+            with open(filename, 'w') as f:
+                f.write(content)
+            print(rtc.datetime(), f'RPC uploadFile: {filename} written ({len(content)} bytes)')
+            tb_client.send_rpc_reply(request_id, {'success': True, 'filename': filename})
+        except Exception as e:
+            tb_client.send_rpc_reply(request_id, {'success': False, 'error': str(e)})
+    elif method == 'reboot':
+        tb_client.send_rpc_reply(request_id, {'success': True})
+        time.sleep_ms(500)
+        machine.reset()
+
+async def mqtt_task():
+    global running
+    while running:
+        try:
+            if tb_client is not None:
+                tb_client.check_msg()
+        except Exception as e:
+            print(rtc.datetime(), 'MQTT error:', e)
+        await asyncio.sleep_ms(200)
 ''' Error JSON:
     error_transmission = {"time": rtc.datetime(),
                           "place": "read_data"/"send_data"/"receive_time"/"wlanConnect",
@@ -195,6 +234,15 @@ if isconnected:
     
     ## Ask for actual server time to keep rtc up to date
     rtc_isupdated = receive_time()
+
+    ## Connect to ThingsBoard via MQTT
+    tb_client = TBDeviceMqttClient(get_env("MQTT_BROKER"), int(get_env("MQTT_PORT")), get_env("MQTT_ACCESS_TOKEN"))
+    tb_client.set_server_side_rpc_request_handler(rpc_handler)
+    try:
+        tb_client.connect()
+        print(rtc.datetime(), 'ThingsBoard MQTT connected')
+    except Exception as e:
+        print(rtc.datetime(), 'ThingsBoard MQTT connect failed:', e)
 
     if secrets['per_dataacq']:
         data_timer = machine.Timer(1)
@@ -223,7 +271,8 @@ if isconnected:
     async def main():
         task_pulse = asyncio.create_task(pulse_led())
         task_main_loop = asyncio.create_task(main_loop())
-        await asyncio.gather(task_pulse, task_main_loop)
+        task_mqtt = asyncio.create_task(mqtt_task())
+        await asyncio.gather(task_pulse, task_main_loop, task_mqtt)
 
     running = True
     asyncio.run(main())

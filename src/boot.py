@@ -4,12 +4,13 @@
 import machine
 import network
 import time
-from config import network_config as wlancfg
+from micro_dotenv import load_dotenv, get_env
 
+load_dotenv()  # Load environment variables from .env file
 
 # ==== WLAN-Zugangsdaten ====
-WIFI_SSID = wlancfg['ssid']
-WIFI_PASSWORD = wlancfg.get('pw', '')  # Passwort optional, falls kein Passwort benötigt wird
+WIFI_SSID = get_env('WIFI_SSID')
+WIFI_PASSWORD = get_env('WIFI_PASSWORD', '')  # Passwort optional, falls kein Passwort benötigt wird
 MAX_RETRIES = 10  # Anzahl der Verbindungsversuche
 
 def connect_wifi():

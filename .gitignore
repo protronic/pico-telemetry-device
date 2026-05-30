@@ -1,4 +1,6 @@
 __pycache__
 typings
-wifi_pw.py
+pw.py
 _archive/*
+.venv
+.env

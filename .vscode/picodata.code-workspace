@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"name": "local Workspace",
+			"path": ".."
+		},
+		{
+			"name": "Mpy Remote Workspace",
+			"uri": "pico:"
+		}
+	],
+	"settings": {
+		"python.languageServer": "Pylance",
+		"powershell.cwd": "picodata",
+		"python.terminal.useEnvFile": true
+	}
+}

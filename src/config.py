@@ -16,10 +16,8 @@ fuer eine low-level TCP-Verbindung
     'server_ip': str, IPv4-Adresse des Servers
     'server_port': int, geoeffneter Port des Servers
 '''
-from wifi_pw import pw
 
 secrets = {
-    'server_ip': '192.168.2.109',
     'server_port': 12345,
     'sensor_id': 'Entwicklung',
     'i2c_bus': 0,
@@ -29,12 +27,6 @@ secrets = {
     'interval': 5000,
     'server_url': 'https://database3.protronic-gmbh.de/query?database=PicoTelemetry',
     'server_url': 'http://10.19.28.29:3021/',
-    'use_wdt': True,
-    }
-
-network_config = {
-    'ssid': 'IOT_WIFI',
-    'pw': pw,    
+    'use_wdt': False,
 }
-    
-    
+

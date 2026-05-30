@@ -1,0 +1,272 @@
+<!--
+================================================================================
+  ThingsBoard Custom Control Widget – Pico File Uploader
+================================================================================
+
+  Anleitung:
+  1.  ThingsBoard öffnen → Widget Library → "+ Widget bundle" oder vorhandenes Bundle
+  2.  "+ Widget" → Typ: "Control widget"
+  3.  Den Inhalt der Tabs wie folgt befüllen:
+
+      [ HTML ]      → Abschnitt "HTML TEMPLATE" unten
+      [ JavaScript ]→ Abschnitt "JAVASCRIPT" unten
+      [ CSS ]       → Abschnitt "CSS" unten (optional)
+      [ Resources ] → leer lassen
+
+  4.  Widget auf ein Dashboard ziehen → Entity = Pico-Gerät auswählen
+================================================================================
+-->
+
+<!-- ══════════════════════════════════════════════════════ HTML TEMPLATE ══ -->
+<div id="pico-uploader">
+
+  <div class="row">
+    <label>Dateiname</label>
+    <select id="pu-select">
+      <option value="main.py">main.py</option>
+      <option value="boot.py">boot.py</option>
+      <option value="config.py">config.py</option>
+      <option value="__custom__">-- eigener Name --</option>
+    </select>
+    <input id="pu-custom" type="text" placeholder="dateiname.py" style="display:none;">
+  </div>
+
+  <div class="row">
+    <label>Datei laden</label>
+    <input id="pu-file" type="file" accept=".py,.txt,.json">
+  </div>
+
+  <div class="row editor-row">
+    <label>Inhalt</label>
+    <textarea id="pu-editor" spellcheck="false" placeholder="# Python-Code hier eingeben oder Datei laden..."></textarea>
+  </div>
+
+  <div class="row actions">
+    <button id="pu-send" class="tb-btn primary">&#8593; Auf Pico übertragen</button>
+    <button id="pu-reboot" class="tb-btn danger">&#8635; Pico neustarten</button>
+  </div>
+
+  <div id="pu-status" class="status"></div>
+
+</div>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+
+<!-- ══════════════════════════════════════════════════════════ JAVASCRIPT ══
+     (Diesen Abschnitt in den "JavaScript"-Tab des Widget-Editors kopieren)
+═══════════════════════════════════════════════════════════════════════════ -->
+<script id="JAVASCRIPT_TAB_CONTENT" type="text/plain">
+
+self.onInit = function () {
+
+    var sel      = document.getElementById('pu-select');
+    var custom   = document.getElementById('pu-custom');
+    var fileIn   = document.getElementById('pu-file');
+    var editor   = document.getElementById('pu-editor');
+    var sendBtn  = document.getElementById('pu-send');
+    var rebootBtn= document.getElementById('pu-reboot');
+    var status   = document.getElementById('pu-status');
+
+    // ── Hilfsfunktionen ──────────────────────────────────────────────────
+
+    function setStatus(msg, type) {
+        status.textContent = msg;
+        status.className = 'status ' + (type || '');
+    }
+
+    function getFilename() {
+        if (sel.value === '__custom__') {
+            return custom.value.trim();
+        }
+        return sel.value;
+    }
+
+    // ── Dateiname-Dropdown ───────────────────────────────────────────────
+
+    sel.addEventListener('change', function () {
+        custom.style.display = (sel.value === '__custom__') ? 'inline-block' : 'none';
+    });
+
+    // ── Datei vom PC laden ───────────────────────────────────────────────
+
+    fileIn.addEventListener('change', function () {
+        var file = fileIn.files[0];
+        if (!file) return;
+
+        // Dateinamen automatisch übernehmen
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === file.name) {
+                sel.value = file.name;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            sel.value = '__custom__';
+            custom.style.display = 'inline-block';
+            custom.value = file.name;
+        }
+
+        var reader = new FileReader();
+        reader.onload = function (e) {
+            editor.value = e.target.result;
+            setStatus('Datei geladen: ' + file.name + ' (' + file.size + ' Bytes)', 'info');
+        };
+        reader.readAsText(file, 'utf-8');
+    });
+
+    // ── Datei übertragen (RPC: uploadFile) ───────────────────────────────
+
+    sendBtn.addEventListener('click', function () {
+        var filename = getFilename();
+        var content  = editor.value;
+
+        if (!filename) {
+            setStatus('Bitte Dateinamen angeben.', 'error');
+            return;
+        }
+        if (!content) {
+            setStatus('Inhalt ist leer.', 'error');
+            return;
+        }
+
+        setStatus('Übertrage ' + filename + ' …', 'info');
+        sendBtn.disabled = true;
+
+        self.ctx.controlApi.sendTwoWayCommand(
+            'uploadFile',
+            { filename: filename, content: content },
+            15000          // Timeout ms
+        ).subscribe(
+            function (response) {
+                sendBtn.disabled = false;
+                if (response && response.success) {
+                    setStatus('✓ ' + filename + ' erfolgreich übertragen.', 'ok');
+                } else {
+                    var err = (response && response.error) ? response.error : 'Unbekannter Fehler';
+                    setStatus('✗ Fehler: ' + err, 'error');
+                }
+            },
+            function (error) {
+                sendBtn.disabled = false;
+                setStatus('✗ RPC-Fehler: ' + (error.message || error), 'error');
+            }
+        );
+    });
+
+    // ── Neustart (RPC: reboot) ────────────────────────────────────────────
+
+    rebootBtn.addEventListener('click', function () {
+        if (!confirm('Pico wirklich neustarten?')) return;
+        setStatus('Neustart wird ausgelöst …', 'info');
+        rebootBtn.disabled = true;
+
+        self.ctx.controlApi.sendOneWayCommand('reboot', {}, 5000).subscribe(
+            function () {
+                rebootBtn.disabled = false;
+                setStatus('✓ Neustart ausgelöst.', 'ok');
+            },
+            function (error) {
+                rebootBtn.disabled = false;
+                setStatus('✗ RPC-Fehler: ' + (error.message || error), 'error');
+            }
+        );
+    });
+};
+
+self.onDestroy = function () {};
+
+</script>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+
+<!-- ══════════════════════════════════════════════════════════════════ CSS ══
+     (Diesen Abschnitt in den "CSS"-Tab des Widget-Editors kopieren)
+═══════════════════════════════════════════════════════════════════════════ -->
+<style id="CSS_TAB_CONTENT" type="text/plain">
+
+#pico-uploader {
+    padding: 12px;
+    font-family: Roboto, sans-serif;
+    font-size: 13px;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.row label {
+    min-width: 90px;
+    padding-top: 4px;
+    font-weight: 500;
+    color: #555;
+}
+
+.editor-row {
+    flex: 1;
+    min-height: 0;
+}
+
+#pu-select {
+    flex: 1;
+}
+
+#pu-custom {
+    flex: 1;
+}
+
+#pu-editor {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 12px;
+    resize: none;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 8px;
+    box-sizing: border-box;
+}
+
+.actions {
+    gap: 8px;
+    margin-left: 98px;
+}
+
+.tb-btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.tb-btn.primary  { background: #305680; color: white; }
+.tb-btn.danger   { background: #c0392b; color: white; }
+.tb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status {
+    margin-left: 98px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    min-height: 24px;
+    font-size: 12px;
+}
+
+.status.ok    { background: #e8f5e9; color: #2e7d32; }
+.status.error { background: #ffebee; color: #c62828; }
+.status.info  { background: #e3f2fd; color: #1565c0; }
+
+</style>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
