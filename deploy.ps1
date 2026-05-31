@@ -7,8 +7,10 @@
 # Aufruf:   .\deploy.ps1 -AccessToken "MqttToken" -Location "Standort"
 #           .\deploy.ps1 -t "MqttToken" -l "Standort"
 #           .\deploy.ps1 -t "MqttToken" -l "Standort" -Method RPC -DeviceId "uuid"
-#           .\deploy.ps1 -n 1 -m RPC          (lookup via DEVICE_ID_1, DEVICE_AT_1, DEVICE_LOCATION_1)
+#           .\.deploy.ps1 -n 1 -m RPC          (lookup via DEVICE_ID_1, DEVICE_AT_1, DEVICE_LOCATION_1)
 #           .\deploy.ps1 -n DEV -m RPC        (lookup via DEVICE_ID_DEV, DEVICE_AT_DEV, DEVICE_LOCATION_DEV)
+#           .\deploy.ps1 -n DEV -m RPC -UseTestClient  (deploy testclient/ instead of src/)
+#           .\deploy.ps1 -m scp -Target "pi@raspberrypi:/home/pi/app/"  (SCP deploy)
 
 param(
     [Alias("l")]
@@ -16,12 +18,15 @@ param(
     [Alias("t")]
     [string]$AccessToken = "",
     [Alias("m")]
-    [ValidateSet("mpremote", "RPC")]
+    [ValidateSet("mpremote", "RPC", "scp")]
     [string]$Method = "mpremote",
     [Alias("d")]
     [string]$DeviceId = "",
     [Alias("n")]
-    [string]$DeviceNr = ""
+    [string]$DeviceNr = "",
+    [Alias("T")]
+    [string]$Target = "",
+    [switch]$UseTestClient
 )
 
 function Get-EnvValue {
@@ -42,7 +47,8 @@ function Set-EnvValue {
     }
 }
 
-$SrcDir = Join-Path $PSScriptRoot "src"
+$SrcDir = if ($UseTestClient) { Join-Path $PSScriptRoot "testclient" } else { Join-Path $PSScriptRoot "src" }
+if ($UseTestClient) { Write-Host "Quelle: testclient/" }
 $EnvFile = Join-Path $SrcDir ".env"
 $envContent = Get-Content $EnvFile
 
@@ -94,6 +100,37 @@ Set-EnvValue "DEPLOY_STATUS"     $DeployStatus
 $envContent | Set-Content $EnvFile
 
 # ── Deploy-Funktionen ─────────────────────────────────────────────────────────
+
+function Deploy-ViaScp {
+    if (-not $Target) {
+        Write-Error "Bitte -Target 'user@host:/remote/path/' angeben."
+        return
+    }
+    $remoteBase = $Target.TrimEnd('/') + '/'
+    # Host-Teil fuer ssh (alles vor dem ersten ':')
+    $sshHost = ($remoteBase -split ':')[0]
+
+    $files = Get-ChildItem $SrcDir -File | Where-Object { $_.Extension -eq ".py" -or $_.Name -eq ".env" }
+    foreach ($file in $files) {
+        Write-Host "SCP: $($file.Name)"
+        scp "$($file.FullName)" "${remoteBase}$($file.Name)"
+        if ($LASTEXITCODE -ne 0) { Write-Error "SCP fehlgeschlagen fuer $($file.Name)"; return }
+    }
+
+    $LibDir = Join-Path $SrcDir "Lib"
+    if (Test-Path $LibDir) {
+        $libFiles = Get-ChildItem $LibDir -Recurse -File
+        foreach ($file in $libFiles) {
+            $relativePath = $file.FullName.Substring($SrcDir.Length + 1).Replace("\\", "/")
+            $relDir = ($relativePath | Split-Path -Parent).Replace("\\", "/")
+            $remoteDir = ($remoteBase -replace '^[^:]+:', '') + $relDir
+            Write-Host "SCP: $relativePath"
+            ssh $sshHost "mkdir -p '$remoteDir'" 2>$null
+            scp "$($file.FullName)" "${remoteBase}${relativePath}"
+            if ($LASTEXITCODE -ne 0) { Write-Error "SCP fehlgeschlagen fuer $relativePath"; return }
+        }
+    }
+}
 
 function Deploy-ViaMpremote {
     # .py Dateien und .env auf Geraet uebertragen
@@ -297,6 +334,9 @@ function Deploy-ViaRpc {
 if ($Method -eq "RPC") {
     Write-Host "Deployment per ThingsBoard RPC..."
     Deploy-ViaRpc -DeviceId $DeviceId
+} elseif ($Method -eq "scp") {
+    Write-Host "Deployment per SCP nach $Target..."
+    Deploy-ViaScp
 } else {
     Write-Host "Deployment per mpremote (USB)..."
     Deploy-ViaMpremote
