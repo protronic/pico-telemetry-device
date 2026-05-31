@@ -25,11 +25,9 @@ import machine, rp2
 import utime as time
 import network
 import uasyncio as asyncio
-#import asyncio
 
 import urequests as ur  # für HTTP-Version
 import ujson as json
-#import socket, json     # für TCP Version
 
 #import BME280
 import bme280_self as BME280
