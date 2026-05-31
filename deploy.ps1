@@ -197,13 +197,13 @@ function Deploy-ViaRpc {
             return
         }
 
-        # 2FA: ThingsBoard gibt mfaToken statt JWT zurueck
-        if ($login.mfaToken) {
+        # 2FA: ThingsBoard gibt token mit scope=PRE_VERIFICATION_TOKEN zurueck
+        if ($login.scope -eq "PRE_VERIFICATION_TOKEN") {
             $totpCode = Read-Host "2FA-Code (TOTP)"
             try {
-                $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check" `
-                    -Method POST -ContentType "application/json" `
-                    -Body "{`"mfaToken`":`"$($login.mfaToken)`",`"verificationCode`":`"$totpCode`"}" `
+                $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check?providerType=TOTP&verificationCode=$totpCode" `
+                    -Method POST `
+                    -Headers @{ Authorization = "Bearer $($login.token)" } `
                     -ErrorAction Stop
             } catch {
                 Write-Error "2FA-Verifikation fehlgeschlagen: $_"
@@ -213,7 +213,7 @@ function Deploy-ViaRpc {
         } elseif ($login.token) {
             $jwt = $login.token
         } else {
-            Write-Error "Login-Response enthaelt weder 'token' noch 'mfaToken'. Abbruch."
+            Write-Error "Login-Response enthaelt kein token. Abbruch."
             return
         }
 
@@ -233,6 +233,8 @@ function Deploy-ViaRpc {
     }
 
     # .py Dateien und .env per uploadFile RPC uebertragen
+    Write-Host "DEBUG RPC-URL: $rpcUrl$DeviceId"
+    Write-Host "DEBUG Auth-Header: $($headers.Authorization.Substring(0,30))..."
     $files = Get-ChildItem $SrcDir -File | Where-Object { $_.Extension -eq ".py" -or $_.Name -eq ".env" }
     foreach ($file in $files) {
         Write-Host "RPC uploadFile: $($file.Name)"
