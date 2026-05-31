@@ -188,7 +188,7 @@ function Deploy-ViaRpc {
             -ErrorAction Stop
 
         # 2FA: ThingsBoard gibt mfaToken statt JWT zurueck
-        Write-Verbose "Login-Response-Felder: $($login | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name)"
+        Write-Host "DEBUG Login-Response: $($login | ConvertTo-Json -Compress)"
         if ($login.mfaToken) {
             $totpCode = Read-Host "2FA-Code (TOTP)"
             $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check" `
