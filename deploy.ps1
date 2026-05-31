@@ -137,26 +137,23 @@ function Deploy-ViaRpc {
         return
     }
 
+    $baseUrl = $rpcUrl -replace "/api/rpc/twoway/?$", ""
+
     # API-Key versuchen, bei Fehler (401/403) auf Login-Flow fallback
     $headers = $null
     if ($apiKey) {
-        Write-Host "Verwende API-Key aus .env..."
+        Write-Host "Pruefe API-Key..."
         $testHeaders = @{ Authorization = "Bearer $apiKey" }
         try {
-            Invoke-RestMethod -Uri "$rpcUrl`00000000-0000-0000-0000-000000000000" `
-                -Method POST -ContentType "application/json" `
-                -Headers $testHeaders `
-                -Body '{"method":"ping","params":{},"timeout":1000}' `
-                -ErrorAction Stop | Out-Null
+            # /api/auth/user gibt 200 bei gueltigem Token, 401 bei ungueltigem
+            Invoke-RestMethod -Uri "$baseUrl/api/auth/user" `
+                -Headers $testHeaders -ErrorAction Stop | Out-Null
+            $headers = $testHeaders
+            Write-Host "API-Key gueltig."
         } catch {
             $statusCode = $_.Exception.Response.StatusCode.value__
-            if ($statusCode -eq 401 -or $statusCode -eq 403) {
-                Write-Warning "API-Key abgelaufen oder ungueltig (HTTP $statusCode) – falle zurueck auf Login."
-                $apiKey = $null
-            }
-            # 404/408 = Geraet nicht gefunden/kein Response → Key ist aber gueltig
+            Write-Warning "API-Key ungueltig oder abgelaufen (HTTP $statusCode) – falle zurueck auf Login."
         }
-        if ($apiKey) { $headers = $testHeaders }
     }
 
     if (-not $headers) {
@@ -179,7 +176,6 @@ function Deploy-ViaRpc {
     }
 
     # DeviceId per Location-Attribut nachschlagen, falls nicht angegeben
-    $baseUrl = $rpcUrl -replace "/api/rpc/twoway/?$", ""
     if (-not $DeviceId) {
         Write-Host "Suche Geraet mit location='$Location'..."
         $DeviceId = Resolve-DeviceId -Location $Location -Headers $headers -BaseUrl $baseUrl
