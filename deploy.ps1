@@ -128,42 +128,57 @@ function Deploy-ViaRpc {
     $envMap = @{}
     $deployEnv | ForEach-Object { $envMap[$_.Key] = $_.Value }
 
-    $apiKey   = $envMap["THINGSBOARD_API_KEY"]
     $rpcUrl   = $envMap["THINGSBOARD_RPC_URL"]
     $loginUrl = $envMap["THINGSBOARD_LOGIN_URL"]
+    $tbUser   = $envMap["THINGSBOARD_USERNAME"]
 
     if (-not $rpcUrl) {
         Write-Error "THINGSBOARD_RPC_URL fehlt in .env"
         return
     }
+    if (-not $loginUrl) {
+        Write-Error "THINGSBOARD_LOGIN_URL fehlt in .env"
+        return
+    }
 
     $baseUrl = $rpcUrl -replace "/api/rpc/twoway/?$", ""
 
-    # API-Key versuchen, bei Fehler (401/403) auf Login-Flow fallback
-    $headers = $null
-    if ($apiKey) {
-        Write-Host "Pruefe API-Key..."
-        $testHeaders = @{ Authorization = "Bearer $apiKey" }
+    # JWT aus Cache laden (gespeichert in %TEMP%\tb_jwt_<user>.json)
+    function Get-JwtExpiry([string]$token) {
         try {
-            # /api/auth/user gibt 200 bei gueltigem Token, 401 bei ungueltigem
-            Invoke-RestMethod -Uri "$baseUrl/api/auth/user" `
-                -Headers $testHeaders -ErrorAction Stop | Out-Null
-            $headers = $testHeaders
-            Write-Host "API-Key gueltig."
-        } catch {
-            $statusCode = $_.Exception.Response.StatusCode.value__
-            Write-Warning "API-Key ungueltig oder abgelaufen (HTTP $statusCode) – falle zurueck auf Login."
+            $payload = $token.Split('.')[1]
+            # Base64url → Base64
+            $pad = 4 - ($payload.Length % 4); if ($pad -ne 4) { $payload += '=' * $pad }
+            $payload = $payload.Replace('-', '+').Replace('_', '/')
+            $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+            return ($json | ConvertFrom-Json).exp
+        } catch { return 0 }
+    }
+
+    if (-not $tbUser) { $tbUser = Read-Host "ThingsBoard Benutzer" }
+    $cacheFile = Join-Path $env:TEMP "tb_jwt_$($tbUser -replace '[^a-zA-Z0-9]','_').json"
+
+    $headers = $null
+    if (Test-Path $cacheFile) {
+        $cached = Get-Content $cacheFile | ConvertFrom-Json
+        $expiry = Get-JwtExpiry $cached.token
+        $nowEpoch = [int][double]::Parse((Get-Date -UFormat %s))
+        if ($expiry -gt ($nowEpoch + 60)) {
+            Write-Host "Verwende gecachtes JWT-Token (gueltig bis $([DateTimeOffset]::FromUnixTimeSeconds($expiry).LocalDateTime))..."
+            $headers = @{ Authorization = "Bearer $($cached.token)" }
+            # Kurz pruefen ob Token noch akzeptiert wird
+            try {
+                Invoke-RestMethod -Uri "$baseUrl/api/auth/user" -Headers $headers -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Warning "Gecachtes Token abgelaufen – neu anmelden."
+                $headers = $null
+            }
+        } else {
+            Write-Host "Gecachtes JWT-Token abgelaufen – neu anmelden."
         }
     }
 
     if (-not $headers) {
-        # Login-Flow als Fallback
-        if (-not $loginUrl) {
-            Write-Error "Kein API-Key und THINGSBOARD_LOGIN_URL fehlt in .env"
-            return
-        }
-        $tbUser = $envMap["THINGSBOARD_USERNAME"]
-        if (-not $tbUser) { $tbUser = Read-Host "ThingsBoard Benutzer" }
         $tbPass = Read-Host "Passwort fuer $tbUser" -AsSecureString
         $tbPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($tbPass))
@@ -172,7 +187,8 @@ function Deploy-ViaRpc {
             -Body "{`"username`":`"$tbUser`",`"password`":`"$tbPassPlain`"}" `
             -ErrorAction Stop
         $headers = @{ Authorization = "Bearer $($login.token)" }
-        Write-Host "Login erfolgreich."
+        @{ token = $login.token } | ConvertTo-Json | Set-Content $cacheFile
+        Write-Host "Login erfolgreich. Token gecacht in $cacheFile"
     }
 
     # DeviceId per Location-Attribut nachschlagen, falls nicht angegeben
