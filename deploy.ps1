@@ -180,24 +180,41 @@ function Deploy-ViaRpc {
 
     if (-not $headers) {
         $tbPass = Read-Host "Passwort fuer $tbUser" -AsSecureString
+        if (-not $tbPass -or $tbPass.Length -eq 0) {
+            Write-Error "Kein Passwort eingegeben. Abbruch."
+            return
+        }
         $tbPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
             [Runtime.InteropServices.Marshal]::SecureStringToBSTR($tbPass))
-        $login = Invoke-RestMethod -Uri $loginUrl `
-            -Method POST -ContentType "application/json" `
-            -Body "{`"username`":`"$tbUser`",`"password`":`"$tbPassPlain`"}" `
-            -ErrorAction Stop
+
+        try {
+            $login = Invoke-RestMethod -Uri $loginUrl `
+                -Method POST -ContentType "application/json" `
+                -Body "{`"username`":`"$tbUser`",`"password`":`"$tbPassPlain`"}" `
+                -ErrorAction Stop
+        } catch {
+            Write-Error "Login fehlgeschlagen: $_"
+            return
+        }
 
         # 2FA: ThingsBoard gibt mfaToken statt JWT zurueck
-        Write-Host "DEBUG Login-Response: $($login | ConvertTo-Json -Compress)"
         if ($login.mfaToken) {
             $totpCode = Read-Host "2FA-Code (TOTP)"
-            $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check" `
-                -Method POST -ContentType "application/json" `
-                -Body "{`"mfaToken`":`"$($login.mfaToken)`",`"verificationCode`":`"$totpCode`"}" `
-                -ErrorAction Stop
+            try {
+                $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check" `
+                    -Method POST -ContentType "application/json" `
+                    -Body "{`"mfaToken`":`"$($login.mfaToken)`",`"verificationCode`":`"$totpCode`"}" `
+                    -ErrorAction Stop
+            } catch {
+                Write-Error "2FA-Verifikation fehlgeschlagen: $_"
+                return
+            }
             $jwt = $mfaCheck.token
-        } else {
+        } elseif ($login.token) {
             $jwt = $login.token
+        } else {
+            Write-Error "Login-Response enthaelt weder 'token' noch 'mfaToken'. Abbruch."
+            return
         }
 
         $headers = @{ Authorization = "Bearer $jwt" }
