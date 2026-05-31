@@ -1,0 +1,14 @@
+asyncio==4.0.0
+certifi==2026.5.20
+charset-normalizer==3.4.7
+idna==3.17
+mmh3==5.2.1
+orjson==3.11.9
+packaging==26.2
+python-dotenv==1.2.2
+regex==2026.5.9
+requests==2.34.2
+tb-mqtt-client==1.13.13
+tb-paho-mqtt-client==2.1.2
+typing_extensions==4.15.0
+urllib3==2.7.0
