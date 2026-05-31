@@ -51,12 +51,14 @@ def rpc_handler(request_id, body):
             tb.send_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
             return
         PROTECTED = {'testclient.py', '.env'}
-        if Path(filename).name in PROTECTED:
-            print(f'[RPC ←] uploadFile: {filename!r} ist geschuetzt – wird ignoriert')
-            tb.send_rpc_reply(request_id, {'success': True, 'skipped': True, 'reason': 'protected'})
-            return
+        # if Path(filename).name in PROTECTED:
+        #     print(f'[RPC ←] uploadFile: {filename!r} ist geschuetzt – wird ignoriert')
+        #     tb.send_rpc_reply(request_id, {'success': True, 'skipped': True, 'reason': 'protected'})
+        #     return
         try:
             target = Path(__file__).parent / filename
+            if Path(filename).name in PROTECTED:
+                target = Path(__file__).parent / f'_{filename}'
             target.write_text(content, encoding='utf-8')
             print(f'[RPC ←] uploadFile: {target} geschrieben ({len(content)} Bytes)')
             tb.send_rpc_reply(request_id, {'success': True, 'filename': filename})
@@ -118,6 +120,7 @@ tb.send_attributes({
     'commit_hash':    os.getenv('DEPLOY_COMMIT_HASH', ''),
     'git_url':        os.getenv('DEPLOY_GIT_URL', ''),
     'wifi_ssid':      os.getenv('WIFI_SSID', ''),
+    'version':        os.getenv('SOFTWARE_VERSION', 'unknown'),
 })
 print('[Attr] Client-Attribute gesendet')
 
