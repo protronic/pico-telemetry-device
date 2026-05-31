@@ -1,8 +1,8 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$AccessToken,
-    [Parameter(Mandatory = $true)]
-    [string]$Location
+    [Alias("l")]
+    [string]$Location = "Testdevice",
+    [Alias("t")]
+    [string]$AccessToken = ""
 )
 
 function Get-EnvValue {
@@ -26,6 +26,7 @@ function Set-EnvValue {
 $SrcDir = Join-Path $PSScriptRoot "src"
 $EnvFile = Join-Path $SrcDir ".env"
 $envContent = Get-Content $EnvFile
+$DeployStatus = (-not $AccessToken) ? "development" : "production"
 
 # Git commit vor dem Deploy
 Write-Host "Committe Aenderungen..."
@@ -40,10 +41,14 @@ $CommitHash = git -C $PSScriptRoot rev-parse HEAD
 $GitUrl = git -C $PSScriptRoot remote get-url origin
 
 # .env mit neuem Token, Location und Git-Infos aktualisieren
+if (-not $AccessToken) {
+    $AccessToken = Get-EnvValue "MQTT_ACCESS_TOKEN_DEV"
+}
 Set-EnvValue "MQTT_ACCESS_TOKEN" $AccessToken
 Set-EnvValue "DEPLOY_LOCATION"   $Location
 Set-EnvValue "DEPLOY_COMMIT_HASH" $CommitHash
 Set-EnvValue "DEPLOY_GIT_URL"    $GitUrl
+Set-EnvValue "DEPLOY_STATUS"     $DeployStatus
 
 $envContent | Set-Content $EnvFile
 # Write-Host "Token gesetzt: $AccessToken"

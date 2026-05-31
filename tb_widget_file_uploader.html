@@ -13,12 +13,33 @@
       [ CSS ]       → Abschnitt "CSS" unten (optional)
       [ Resources ] → leer lassen
 
-  4.  Widget auf ein Dashboard ziehen → Entity = Pico-Gerät auswählen
+  4.  Widget auf ein Dashboard ziehen
+      → Kein Zielgerät / Entitätsalias nötig — das Widget lädt alle Geräte
+        mit dem Profil "PicoData" automatisch aus der ThingsBoard-API und
+        zeigt sie im Dropdown an.
+      → Der angemeldete Nutzer benötigt Lesezugriff auf Geräteinformationen
+        sowie Schreibzugriff für Server-seitige RPCs (Tenant-Admin oder
+        entsprechende Rolle).
+
+  Geräte-Dropdown:
+      - Beim Start werden alle Geräte mit Profil "PicoData" geladen
+        (max. 100, alphabetisch sortiert).
+      - Der ↻-Button aktualisiert die Liste (z. B. nach Hinzufügen eines Geräts).
+
+  Unterstützte RPCs:
+      - uploadFile  { filename, content }  → Datei auf dem Pico ablegen
+      - reboot      {}                     → Pico neustarten
 ================================================================================
 -->
 
 <!-- ══════════════════════════════════════════════════════ HTML TEMPLATE ══ -->
 <div id="pico-uploader">
+
+  <div class="row">
+    <label>Zielgerät</label>
+    <select id="pu-device"><option value="">-- Lade Geräte… --</option></select>
+    <button id="pu-refresh" class="tb-btn" title="Geräteliste neu laden">↻</button>
+  </div>
 
   <div class="row">
     <label>Dateiname</label>
@@ -59,6 +80,8 @@
 
 self.onInit = function () {
 
+    var deviceSel = document.getElementById('pu-device');
+    var refreshBtn= document.getElementById('pu-refresh');
     var sel      = document.getElementById('pu-select');
     var custom   = document.getElementById('pu-custom');
     var fileIn   = document.getElementById('pu-file');
@@ -81,6 +104,43 @@ self.onInit = function () {
         return sel.value;
     }
 
+    // ── Geräteliste laden (gefiltert auf PicoData-Profil) ────────────────
+
+    function loadDevices() {
+        deviceSel.innerHTML = '<option value="">-- Lade Geräte… --</option>';
+        deviceSel.disabled = true;
+
+        self.ctx.http.get(
+            '/api/tenant/deviceInfos?pageSize=100&page=0&sortProperty=name&sortOrder=ASC'
+        ).subscribe(
+            function (resp) {
+                var devices = (resp.data || []).filter(function (d) {
+                    return d.deviceProfileName === 'PicoData';
+                });
+                deviceSel.innerHTML = '';
+                if (devices.length === 0) {
+                    deviceSel.innerHTML = '<option value="">Keine PicoData-Geräte gefunden</option>';
+                    deviceSel.disabled = true;
+                    return;
+                }
+                devices.forEach(function (d) {
+                    var opt = document.createElement('option');
+                    opt.value = d.id.id;
+                    opt.textContent = d.name;
+                    deviceSel.appendChild(opt);
+                });
+                deviceSel.disabled = false;
+            },
+            function () {
+                deviceSel.innerHTML = '<option value="">Fehler beim Laden der Geräte</option>';
+                deviceSel.disabled = true;
+            }
+        );
+    }
+
+    refreshBtn.addEventListener('click', loadDevices);
+    loadDevices();
+
     // ── Dateiname-Dropdown ───────────────────────────────────────────────
 
     sel.addEventListener('change', function () {
@@ -93,7 +153,6 @@ self.onInit = function () {
         var file = fileIn.files[0];
         if (!file) return;
 
-        // Dateinamen automatisch übernehmen
         var found = false;
         for (var i = 0; i < sel.options.length; i++) {
             if (sel.options[i].value === file.name) {
@@ -119,9 +178,14 @@ self.onInit = function () {
     // ── Datei übertragen (RPC: uploadFile) ───────────────────────────────
 
     sendBtn.addEventListener('click', function () {
+        var deviceId = deviceSel.value;
         var filename = getFilename();
         var content  = editor.value;
 
+        if (!deviceId) {
+            setStatus('Bitte Zielgerät auswählen.', 'error');
+            return;
+        }
         if (!filename) {
             setStatus('Bitte Dateinamen angeben.', 'error');
             return;
@@ -131,13 +195,12 @@ self.onInit = function () {
             return;
         }
 
-        setStatus('Übertrage ' + filename + ' …', 'info');
+        setStatus('Übertrage ' + filename + ' an ' + deviceSel.options[deviceSel.selectedIndex].text + ' …', 'info');
         sendBtn.disabled = true;
 
-        self.ctx.controlApi.sendTwoWayCommand(
-            'uploadFile',
-            { filename: filename, content: content },
-            15000          // Timeout ms
+        self.ctx.http.post(
+            '/api/rpc/twoway/' + deviceId,
+            { method: 'uploadFile', params: { filename: filename, content: content }, timeout: 15000 }
         ).subscribe(
             function (response) {
                 sendBtn.disabled = false;
@@ -158,11 +221,21 @@ self.onInit = function () {
     // ── Neustart (RPC: reboot) ────────────────────────────────────────────
 
     rebootBtn.addEventListener('click', function () {
-        if (!confirm('Pico wirklich neustarten?')) return;
+        var deviceId = deviceSel.value;
+        if (!deviceId) {
+            setStatus('Bitte Zielgerät auswählen.', 'error');
+            return;
+        }
+        var deviceName = deviceSel.options[deviceSel.selectedIndex].text;
+        if (!confirm(deviceName + ' wirklich neustarten?')) return;
+
         setStatus('Neustart wird ausgelöst …', 'info');
         rebootBtn.disabled = true;
 
-        self.ctx.controlApi.sendOneWayCommand('reboot', {}, 5000).subscribe(
+        self.ctx.http.post(
+            '/api/rpc/oneway/' + deviceId,
+            { method: 'reboot', params: {}, timeout: 5000 }
+        ).subscribe(
             function () {
                 rebootBtn.disabled = false;
                 setStatus('✓ Neustart ausgelöst.', 'ok');
@@ -218,6 +291,16 @@ self.onDestroy = function () {};
 
 #pu-select {
     flex: 1;
+}
+
+#pu-device {
+    flex: 1;
+}
+
+#pu-refresh {
+    padding: 4px 10px;
+    font-size: 14px;
+    flex-shrink: 0;
 }
 
 #pu-custom {

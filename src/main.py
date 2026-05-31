@@ -28,6 +28,7 @@ import uasyncio as asyncio
 #import asyncio
 
 import urequests as ur  # für HTTP-Version
+import ujson as json
 #import socket, json     # für TCP Version
 
 #import BME280
@@ -56,6 +57,51 @@ i2c = machine.I2C(int(secrets['i2c_bus']), scl=machine.Pin(secrets['scl_pin']), 
 bme = BME280.BME280(i2c=i2c, osmode=3)
 # osmode: Temperature oversampling (3 => x4)
 # BME280 default address (I2C0): BME280_I2CADDR = 0x76
+
+def rpc_handler(request_id, request_body):
+    if tb_client is None:
+        return
+    method = request_body.get('method')
+    params = request_body.get('params', {})
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except (ValueError, Exception):
+            params = {}
+    if method == 'uploadFile':
+        filename = params.get('filename', '')
+        content  = params.get('content', '')
+        if not filename:
+            tb_client.send_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
+            return
+        try:
+            with open(filename, 'w') as f:
+                f.write(content)
+            print(rtc.datetime(), f'RPC uploadFile: {filename} written ({len(content)} bytes)')
+            tb_client.send_rpc_reply(request_id, {'success': True, 'filename': filename})
+        except Exception as e:
+            tb_client.send_rpc_reply(request_id, {'success': False, 'error': str(e)})
+    elif method == 'reboot':
+        tb_client.send_rpc_reply(request_id, {'success': True})
+        time.sleep_ms(500)
+        machine.reset()
+
+
+## Connect to ThingsBoard via MQTT
+tb_client = TBDeviceMqttClient(get_env("MQTT_BROKER"), int(get_env("MQTT_PORT")), get_env("MQTT_ACCESS_TOKEN"))
+tb_client.set_server_side_rpc_request_handler(rpc_handler)
+try:
+    tb_client.connect()
+    print('ThingsBoard MQTT connected')
+    tb_client.send_attributes({
+        'location':    get_env('DEPLOY_LOCATION'),
+        'commit_hash': get_env('DEPLOY_COMMIT_HASH'),
+        'git_url':     get_env('DEPLOY_GIT_URL'),
+        'test_client': False,
+    })
+except Exception as e:
+    print('ThingsBoard MQTT connect failed:', e)
+
 
 if secrets['use_wdt']:
     ## Enable the WDT with a timeout of 6s (1s is the minimum)
@@ -95,6 +141,7 @@ def send_data(tempC, hum, pres):
     try:
         s = ur.request ("POST", SERVER_URL, json=data_package)
         print(f'{time} - Code: {s.status_code}')
+        
     except Exception as e:
         print(rtc.datetime(), "Error while sending data: ", e)#################
     finally:
@@ -106,12 +153,48 @@ def update_rtc(rtc_update_timer):
     rtc_isupdated = receive_time()
 
 def receive_time():
+    if tb_client is not None:
+        return _receive_time_mqtt()
+    return _receive_time_http()
+
+def _receive_time_mqtt():
+    ## Requests current server time from ThingsBoard via client-side RPC.
+    ## Requires a ThingsBoard rule chain that handles 'getServerTime'
+    ## and responds with {"ts": <unix_ms>}.
+    _result = {}
+
+    def _on_time_response(response, exception=None):
+        if exception is None and isinstance(response, dict):
+            ts_ms = response.get('ts') or response.get('serverTime')
+            if ts_ms:
+                _result['ts'] = int(ts_ms)
+
+    try:
+        tb_client.send_rpc_call('getServerTime', {}, _on_time_response)
+        deadline = time.ticks_add(time.ticks_ms(), 5000)
+        while 'ts' not in _result and time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            tb_client.check_for_msg()
+            time.sleep_ms(100)
+            wdt.feed()
+        if 'ts' not in _result:
+            print(rtc.datetime(), 'Error while getting Server-Time: no response from ThingsBoard')
+            return False
+        ## gmtime: (year, month, mday, hour, minute, second, weekday, yearday)
+        tt = time.gmtime(_result['ts'] // 1000)
+        rtc.datetime((tt[0], tt[1], tt[2], tt[6], tt[3], tt[4], tt[5], 0))
+        wdt.feed()
+        return True
+    except Exception as e:
+        print(rtc.datetime(), 'Error while getting Server-Time (MQTT): ', e)###
+        return False
+
+def _receive_time_http():
     try:
         ## Ask for actual server time to keep rtc up to date
         response = ur.get(SERVER_URL)
         timestamp = response.headers.get('Date') # GMT timestamp
     except Exception as e:
-        print(rtc.datetime(), "Error while getting Server-Time: ", e)##########
+        print(rtc.datetime(), "Error while getting Server-Time (HTTP): ", e)###
         timestamp = None
     finally:
         response.close()
@@ -134,7 +217,7 @@ def receive_time():
             wdt.feed() # prevent wdt to restart the system
             return True
         except Exception as e:
-            print(rtc.datetime(), "Error while converting Time-Format: ", e)###
+            print(rtc.datetime(), "Error while converting Time-Format (HTTP): ", e)
             return False
     else:
         return False
@@ -177,37 +260,12 @@ async def pulse_led():
         led.off()
         await asyncio.sleep(1.7)
 
-tb_client = None
-
-def rpc_handler(request_id, request_body):
-    if tb_client is None:
-        return
-    method = request_body.get('method')
-    params = request_body.get('params', {})
-    if method == 'uploadFile':
-        filename = params.get('filename', '')
-        content  = params.get('content', '')
-        if not filename:
-            tb_client.send_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
-            return
-        try:
-            with open(filename, 'w') as f:
-                f.write(content)
-            print(rtc.datetime(), f'RPC uploadFile: {filename} written ({len(content)} bytes)')
-            tb_client.send_rpc_reply(request_id, {'success': True, 'filename': filename})
-        except Exception as e:
-            tb_client.send_rpc_reply(request_id, {'success': False, 'error': str(e)})
-    elif method == 'reboot':
-        tb_client.send_rpc_reply(request_id, {'success': True})
-        time.sleep_ms(500)
-        machine.reset()
-
 async def mqtt_task():
     global running
     while running:
         try:
             if tb_client is not None:
-                tb_client.check_msg()
+                tb_client.check_for_msg()
         except Exception as e:
             print(rtc.datetime(), 'MQTT error:', e)
         await asyncio.sleep_ms(200)
@@ -234,15 +292,6 @@ if isconnected:
     
     ## Ask for actual server time to keep rtc up to date
     rtc_isupdated = receive_time()
-
-    ## Connect to ThingsBoard via MQTT
-    tb_client = TBDeviceMqttClient(get_env("MQTT_BROKER"), int(get_env("MQTT_PORT")), get_env("MQTT_ACCESS_TOKEN"))
-    tb_client.set_server_side_rpc_request_handler(rpc_handler)
-    try:
-        tb_client.connect()
-        print(rtc.datetime(), 'ThingsBoard MQTT connected')
-    except Exception as e:
-        print(rtc.datetime(), 'ThingsBoard MQTT connect failed:', e)
 
     if secrets['per_dataacq']:
         data_timer = machine.Timer(1)
