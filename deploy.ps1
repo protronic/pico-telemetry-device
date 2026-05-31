@@ -126,7 +126,7 @@ function Resolve-DeviceId {
     $devices = $resp.data | Where-Object { $_.deviceProfileName -eq "PicoData" }
 
     foreach ($device in $devices) {
-        $attrUrl = $BaseUrl + ($DeviceAttrPath -f $device.id.id)
+        $attrUrl = $BaseUrl + ($DeviceAttrPath -replace '%s', $device.id.id)
         $attrs = Invoke-RestMethod -Uri $attrUrl `
             -Headers $Headers -ErrorAction SilentlyContinue
         $locationAttr = $attrs | Where-Object { $_.key -eq "location" }
@@ -232,7 +232,7 @@ function Deploy-ViaRpc {
         if ($login.scope -eq "PRE_VERIFICATION_TOKEN") {
             $totpCode = Read-Host "2FA-Code (TOTP)"
             try {
-                $verifyUrl = $baseUrl + ($verifyPath -f $totpCode)
+                $verifyUrl = $baseUrl + ($verifyPath -replace '%s', $totpCode)
                 $mfaCheck = Invoke-RestMethod -Uri $verifyUrl `
                     -Method POST `
                     -Headers @{ Authorization = "Bearer $($login.token)" } `
@@ -265,7 +265,7 @@ function Deploy-ViaRpc {
     }
 
     # .py Dateien und .env per uploadFile RPC uebertragen
-    $rpcUrl = $baseUrl + ($rpcPath -f $DeviceId)
+    $rpcUrl = $baseUrl + ($rpcPath -replace '%s', $DeviceId)
     $files = Get-ChildItem $SrcDir -File | Where-Object { $_.Extension -eq ".py" -or $_.Name -eq ".env" }
     foreach ($file in $files) {
         Write-Host "RPC uploadFile: $($file.Name)"

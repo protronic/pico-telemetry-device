@@ -29,7 +29,8 @@ $login = Invoke-RestMethod -Uri $loginUrl `
 # 2FA: ThingsBoard gibt token mit scope=PRE_VERIFICATION_TOKEN zurueck
 if ($login.scope -eq "PRE_VERIFICATION_TOKEN") {
     $totpCode = Read-Host "2FA-Code (TOTP)"
-    $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check?providerType=TOTP&verificationCode=$totpCode" `
+    $verifyUrl = $baseUrl + ($envMap["THINGSBOARD_VERIFY_PATH"] -replace '%s', $totpCode)
+    $mfaCheck = Invoke-RestMethod -Uri $verifyUrl `
         -Method POST `
         -Headers @{ Authorization = "Bearer $($login.token)" } `
         -ErrorAction Stop
