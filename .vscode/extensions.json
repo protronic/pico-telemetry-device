@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "paulober.pico-w-go",
+        "wmiller4.python-venv-switcher",
+    ]
+}
