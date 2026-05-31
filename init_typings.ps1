@@ -1,5 +1,11 @@
 # init_typings.ps1
 # Richtet das typings/-Verzeichnis fuer MicroPython (Pico 2 W) ein.
+#
+# Zweck:    Einmalig ausfuehren (oder nach SDK-Updates), um Pylance-Autocomplete
+#           fuer MicroPython, die ThingsBoard SDK und sdk_core einzurichten.
+#           Laedt Stubs in typings/ herunter.
+#
+# Aufruf:   .\init_typings.ps1
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"

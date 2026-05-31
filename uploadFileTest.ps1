@@ -1,3 +1,13 @@
+# uploadFileTest.ps1
+# Testet den uploadFile-RPC manuell ueber die ThingsBoard REST-API.
+# Schickt eine Testdatei an das Geraet mit der fest hinterlegten Device-ID.
+#
+# Zweck:    Debuggen des RPC-Pfads ohne Widget oder laufenden Pico.
+#           Setzt einen laufenden Testclient (oder Pico) voraus, der auf RPCs wartet.
+#
+# Aufruf:   .\uploadFileTest.ps1
+#           -> fragt ThingsBoard-Benutzername und Passwort interaktiv ab
+
 # Erst ThingsBoard Login-Token holen
 $tbUser = Read-Host "ThingsBoard Benutzer"
 $tbPass = Read-Host "Passwort" -AsSecureString

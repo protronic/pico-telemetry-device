@@ -1,3 +1,12 @@
+# deploy.ps1
+# Uebertraegt src/ via mpremote auf den Pico 2W und traegt git-Metadaten
+# (Commit-Hash, Repository-URL) in src/.env ein.
+#
+# Zweck:    Bei jedem Deployment auf den Pico ausfuehren.
+#
+# Aufruf:   .\deploy.ps1 -AccessToken "MqttToken" -Location "Standort"
+#           .\deploy.ps1 -t "MqttToken" -l "Standort"
+
 param(
     [Alias("l")]
     [string]$Location = "Testdevice",
