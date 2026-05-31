@@ -11,7 +11,7 @@
 	],
 	"settings": {
 		"python.languageServer": "Pylance",
-		"powershell.cwd": "picodata",
+		"powershell.cwd": "local Workspace",
 		"python.terminal.useEnvFile": true
 	}
 }
