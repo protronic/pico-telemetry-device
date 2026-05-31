@@ -186,8 +186,21 @@ function Deploy-ViaRpc {
             -Method POST -ContentType "application/json" `
             -Body "{`"username`":`"$tbUser`",`"password`":`"$tbPassPlain`"}" `
             -ErrorAction Stop
-        $headers = @{ Authorization = "Bearer $($login.token)" }
-        @{ token = $login.token } | ConvertTo-Json | Set-Content $cacheFile
+
+        # 2FA: ThingsBoard gibt mfaToken statt JWT zurueck
+        if ($login.mfaToken) {
+            $totpCode = Read-Host "2FA-Code (TOTP)"
+            $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check" `
+                -Method POST -ContentType "application/json" `
+                -Body "{`"mfaToken`":`"$($login.mfaToken)`",`"verificationCode`":`"$totpCode`"}" `
+                -ErrorAction Stop
+            $jwt = $mfaCheck.token
+        } else {
+            $jwt = $login.token
+        }
+
+        $headers = @{ Authorization = "Bearer $jwt" }
+        @{ token = $jwt } | ConvertTo-Json | Set-Content $cacheFile
         Write-Host "Login erfolgreich. Token gecacht in $cacheFile"
     }
 
