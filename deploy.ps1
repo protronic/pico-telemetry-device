@@ -64,7 +64,7 @@ function Set-DeployEnvValue {
 $SrcDir = if ($UseTestClient) { Join-Path $PSScriptRoot "testclient" } else { Join-Path $PSScriptRoot "src" }
 if ($UseTestClient) { Write-Host "Quelle: testclient/" }
 $EnvFile = Join-Path $SrcDir ".env"
-$envContent = Get-Content $EnvFile
+$envContent = if (Test-Path $EnvFile) { Get-Content $EnvFile } else { @() }
 
 # Root .env laden
 $rootEnvFile = Join-Path $PSScriptRoot ".env"
@@ -72,6 +72,13 @@ $rootEnvContent = Get-Content $rootEnvFile
 $deployEnvRaw = @{}
 $rootEnvContent | Where-Object { $_ -match "^[^#]+=.+" } |
     ForEach-Object { $k, $v = $_ -split "=", 2; $deployEnvRaw[$k.Trim()] = $v.Trim() }
+
+# Netzwerk-Keys aus root .env in src .env uebernehmen
+foreach ($key in @("WIFI_SSID", "WIFI_PASSWORD", "MQTT_BROKER", "MQTT_PORT")) {
+    if ($deployEnvRaw.ContainsKey($key)) {
+        Set-EnvValue $key $deployEnvRaw[$key]
+    }
+}
 
 # DeviceNr: ID, AccessToken und Location aus root .env nachschlagen
 if ($DeviceNr) {
