@@ -32,9 +32,7 @@ param(
 function Get-EnvValue {
     param([string]$Key)
     $line = $script:envContent | Where-Object { $_ -match "^$Key=" }
-    if ($line) {
-        return ($line -split "=", 2)[1]
-    }
+    if ($line) { return ($line -split "=", 2)[1] }
     return $null
 }
 
@@ -47,14 +45,32 @@ function Set-EnvValue {
     }
 }
 
+function Get-DeployEnvValue {
+    param([string]$Key)
+    $line = $script:rootEnvContent | Where-Object { $_ -match "^$Key=" }
+    if ($line) { return ($line -split "=", 2)[1] }
+    return $null
+}
+
+function Set-DeployEnvValue {
+    param([string]$Key, [string]$Value)
+    if ($script:rootEnvContent -match "^$Key=") {
+        $script:rootEnvContent = $script:rootEnvContent -replace "^$Key=.*", "$Key=$Value"
+    } else {
+        $script:rootEnvContent += "$Key=$Value"
+    }
+}
+
 $SrcDir = if ($UseTestClient) { Join-Path $PSScriptRoot "testclient" } else { Join-Path $PSScriptRoot "src" }
 if ($UseTestClient) { Write-Host "Quelle: testclient/" }
 $EnvFile = Join-Path $SrcDir ".env"
 $envContent = Get-Content $EnvFile
 
 # Root .env laden
+$rootEnvFile = Join-Path $PSScriptRoot ".env"
+$rootEnvContent = Get-Content $rootEnvFile
 $deployEnvRaw = @{}
-Get-Content (Join-Path $PSScriptRoot ".env") | Where-Object { $_ -match "^[^#]+=.+" } |
+$rootEnvContent | Where-Object { $_ -match "^[^#]+=.+" } |
     ForEach-Object { $k, $v = $_ -split "=", 2; $deployEnvRaw[$k.Trim()] = $v.Trim() }
 
 # DeviceNr: ID, AccessToken und Location aus root .env nachschlagen
@@ -119,13 +135,7 @@ Set-EnvValue "SOFTWARE_VERSION"  $gitTag
 $envContent | Set-Content $EnvFile
 
 # SOFTWARE_VERSION auch in root .env aktualisieren
-$rootEnvFile = Join-Path $PSScriptRoot ".env"
-$rootEnvContent = Get-Content $rootEnvFile
-if ($rootEnvContent -match "^SOFTWARE_VERSION=") {
-    $rootEnvContent = $rootEnvContent -replace "^SOFTWARE_VERSION=.*", "SOFTWARE_VERSION=$gitTag"
-} else {
-    $rootEnvContent += "SOFTWARE_VERSION=$gitTag"
-}
+Set-DeployEnvValue "SOFTWARE_VERSION" $gitTag
 $rootEnvContent | Set-Content $rootEnvFile
 
 # ── Deploy-Funktionen ─────────────────────────────────────────────────────────
