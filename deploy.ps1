@@ -15,7 +15,7 @@
 param(
     [Alias("l")]
     [string]$Location = "Testdevice",
-    [Alias("t")]
+    [Alias("a")]
     [string]$AccessToken = "",
     [Alias("m")]
     [ValidateSet("mpremote", "RPC", "scp")]
@@ -24,7 +24,7 @@ param(
     [string]$DeviceId = "",
     [Alias("n")]
     [string]$DeviceNr = "",
-    [Alias("T")]
+    [Alias("t")]
     [string]$Target = "",
     [switch]$UseTestClient
 )
@@ -72,10 +72,28 @@ if ($DeviceNr) {
 
 $DeployStatus = (-not $AccessToken) ? "development" : "production"
 
+# Get current Software Version from git tags:
+$gitTag = (git tag -l)[-1]
+# Get current Tag from .env (if exists)
+$currentTag = $deployEnvRaw["SOFTWARE_VERSION"]
+$gitTag = $gitTag -lt $currentTag ? $currentTag : $gitTag
+$parts = $gitTag.split(".")
+$parts[2] = [string]([int]$parts[2] + 1)
+$gitTag = $parts -join "."
+
+# Git pull before committing, to minimize conflicts (especially when multiple developers work on the same repo)
+Write-Host "Git pull vor Deploy..."
+git -C $PSScriptRoot pull --rebase --tags 2>&1 | Write-Host
+
 # Git commit vor dem Deploy
 Write-Host "Committe Aenderungen..."
 git -C $PSScriptRoot add -A
 git -C $PSScriptRoot commit -m "force commit; deploy $Location" 2>&1 | Write-Host
+git -C $PSScriptRoot tag $gitTag
+
+# Git push vor dem Deploy (inkl. Tags)
+git -C $PSScriptRoot push --follow-tags 2>&1 | Write-Host
+
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Hinweis: Nichts zu commiten oder commit fehlgeschlagen."
 }
