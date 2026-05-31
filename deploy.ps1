@@ -38,11 +38,14 @@ function Get-EnvValue {
 
 function Set-EnvValue {
     param([string]$Key, [string]$Value)
-    if ($script:envContent -match "^$Key=") {
-        $script:envContent = $script:envContent -replace "^$Key=.*", "$Key=$Value"
-    } else {
-        $script:envContent += "$Key=$Value"
+    $list = [System.Collections.Generic.List[string]]::new()
+    $found = $false
+    foreach ($line in $script:envContent) {
+        if ($line -match "^$Key=") { $list.Add("$Key=$Value"); $found = $true }
+        else { $list.Add($line) }
     }
+    if (-not $found) { $list.Add("$Key=$Value") }
+    $script:envContent = $list.ToArray()
 }
 
 function Get-DeployEnvValue {
@@ -54,11 +57,14 @@ function Get-DeployEnvValue {
 
 function Set-DeployEnvValue {
     param([string]$Key, [string]$Value)
-    if ($script:rootEnvContent -match "^$Key=") {
-        $script:rootEnvContent = $script:rootEnvContent -replace "^$Key=.*", "$Key=$Value"
-    } else {
-        $script:rootEnvContent += "$Key=$Value"
+    $list = [System.Collections.Generic.List[string]]::new()
+    $found = $false
+    foreach ($line in $script:rootEnvContent) {
+        if ($line -match "^$Key=") { $list.Add("$Key=$Value"); $found = $true }
+        else { $list.Add($line) }
     }
+    if (-not $found) { $list.Add("$Key=$Value") }
+    $script:rootEnvContent = $list.ToArray()
 }
 
 $SrcDir = if ($UseTestClient) { Join-Path $PSScriptRoot "testclient" } else { Join-Path $PSScriptRoot "src" }
