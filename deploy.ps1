@@ -81,14 +81,14 @@ $parts = $gitTag.split(".")
 $parts[2] = [string]([int]$parts[2] + 1)
 $gitTag = $parts -join "."
 
-# Git pull before committing, to minimize conflicts (especially when multiple developers work on the same repo)
-Write-Host "Git pull vor Deploy..."
-git -C $PSScriptRoot pull --rebase --tags 2>&1 | Write-Host
-
 # Git commit vor dem Deploy
 Write-Host "Committe Aenderungen..."
 git -C $PSScriptRoot add -A
 git -C $PSScriptRoot commit -m "force commit; deploy $Location" 2>&1 | Write-Host
+
+# Git pull before committing, to minimize conflicts (especially when multiple developers work on the same repo)
+Write-Host "Git pull vor Deploy..."
+git -C $PSScriptRoot pull --rebase --tags 2>&1 | Write-Host
 git -C $PSScriptRoot tag $gitTag
 
 # Git push vor dem Deploy (inkl. Tags)
