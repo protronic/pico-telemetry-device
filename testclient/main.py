@@ -30,7 +30,7 @@ load_dotenv(env_path)
 
 BROKER = os.getenv('MQTT_BROKER')
 PORT   = int(os.getenv('MQTT_PORT', 1883))
-TOKEN  = os.getenv('MQTT_ACCESS_TOKEN_DEV')
+TOKEN  = os.getenv('MQTT_ACCESS_TOKEN')
 
 # ── Server-seitige RPCs (ThingsBoard → Client) ────────────────────────────────
 def rpc_handler(request_id, body):
