@@ -114,8 +114,19 @@ Set-EnvValue "DEPLOY_LOCATION"   $Location
 Set-EnvValue "DEPLOY_COMMIT_HASH" $CommitHash
 Set-EnvValue "DEPLOY_GIT_URL"    $GitUrl
 Set-EnvValue "DEPLOY_STATUS"     $DeployStatus
+Set-EnvValue "SOFTWARE_VERSION"  $gitTag
 
 $envContent | Set-Content $EnvFile
+
+# SOFTWARE_VERSION auch in root .env aktualisieren
+$rootEnvFile = Join-Path $PSScriptRoot ".env"
+$rootEnvContent = Get-Content $rootEnvFile
+if ($rootEnvContent -match "^SOFTWARE_VERSION=") {
+    $rootEnvContent = $rootEnvContent -replace "^SOFTWARE_VERSION=.*", "SOFTWARE_VERSION=$gitTag"
+} else {
+    $rootEnvContent += "SOFTWARE_VERSION=$gitTag"
+}
+$rootEnvContent | Set-Content $rootEnvFile
 
 # ── Deploy-Funktionen ─────────────────────────────────────────────────────────
 
