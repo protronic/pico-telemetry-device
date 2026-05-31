@@ -30,7 +30,7 @@ load_dotenv(env_path)
 
 BROKER = os.getenv('MQTT_BROKER')
 PORT   = int(os.getenv('MQTT_PORT', 1883))
-TOKEN  = os.getenv('MQTT_ACCESS_TOKEN')
+TOKEN  = os.getenv('MQTT_ACCESS_TOKEN_DEV')
 
 # ── Server-seitige RPCs (ThingsBoard → Client) ────────────────────────────────
 def rpc_handler(request_id, body):
@@ -49,6 +49,11 @@ def rpc_handler(request_id, body):
         content  = params.get('content', '')
         if not filename:
             tb.send_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
+            return
+        PROTECTED = {'testclient.py', '.env'}
+        if Path(filename).name in PROTECTED:
+            print(f'[RPC ←] uploadFile: {filename!r} ist geschuetzt – wird ignoriert')
+            tb.send_rpc_reply(request_id, {'success': True, 'skipped': True, 'reason': 'protected'})
             return
         try:
             target = Path(__file__).parent / filename
