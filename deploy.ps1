@@ -64,7 +64,11 @@ function Set-DeployEnvValue {
 $SrcDir = if ($UseTestClient) { Join-Path $PSScriptRoot "testclient" } else { Join-Path $PSScriptRoot "src" }
 if ($UseTestClient) { Write-Host "Quelle: testclient/" }
 $EnvFile = Join-Path $SrcDir ".env"
-$envContent = if (Test-Path $EnvFile) { Get-Content $EnvFile } else { @() }
+# Sicherstellen dass $envContent immer ein String-Array ist (eine Zeile pro Key)
+$envContent = if (Test-Path $EnvFile) {
+    $raw = Get-Content $EnvFile -Raw
+    @($raw -split "`r?`n" | Where-Object { $_ -ne "" })
+} else { @() }
 
 # Root .env laden
 $rootEnvFile = Join-Path $PSScriptRoot ".env"
