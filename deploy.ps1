@@ -7,6 +7,8 @@
 # Aufruf:   .\deploy.ps1 -AccessToken "MqttToken" -Location "Standort"
 #           .\deploy.ps1 -t "MqttToken" -l "Standort"
 #           .\deploy.ps1 -t "MqttToken" -l "Standort" -Method RPC -DeviceId "uuid"
+#           .\deploy.ps1 -n 1 -m RPC          (lookup via DEVICE_ID_1, DEVICE_AT_1, DEVICE_LOCATION_1)
+#           .\deploy.ps1 -n DEV -m RPC        (lookup via DEVICE_ID_DEV, DEVICE_AT_DEV, DEVICE_LOCATION_DEV)
 
 param(
     [Alias("l")]
@@ -17,7 +19,9 @@ param(
     [ValidateSet("mpremote", "RPC")]
     [string]$Method = "mpremote",
     [Alias("d")]
-    [string]$DeviceId = ""
+    [string]$DeviceId = "",
+    [Alias("n")]
+    [string]$DeviceNr = ""
 )
 
 function Get-EnvValue {
@@ -41,6 +45,25 @@ function Set-EnvValue {
 $SrcDir = Join-Path $PSScriptRoot "src"
 $EnvFile = Join-Path $SrcDir ".env"
 $envContent = Get-Content $EnvFile
+
+# Root .env laden
+$deployEnvRaw = @{}
+Get-Content (Join-Path $PSScriptRoot ".env") | Where-Object { $_ -match "^[^#]+=.+" } |
+    ForEach-Object { $k, $v = $_ -split "=", 2; $deployEnvRaw[$k.Trim()] = $v.Trim() }
+
+# DeviceNr: ID, AccessToken und Location aus root .env nachschlagen
+if ($DeviceNr) {
+    $nr = $DeviceNr.ToUpper()
+    if ($deployEnvRaw["DEVICE_ID_$nr"])       { $DeviceId     = $deployEnvRaw["DEVICE_ID_$nr"] }
+    if ($deployEnvRaw["DEVICE_AT_$nr"])       { $AccessToken  = $deployEnvRaw["DEVICE_AT_$nr"] }
+    if ($deployEnvRaw["DEVICE_LOCATION_$nr"]) { $Location     = $deployEnvRaw["DEVICE_LOCATION_$nr"] }
+    if (-not $DeviceId) {
+        Write-Error "DEVICE_ID_$nr nicht in .env gefunden."
+        exit 1
+    }
+    Write-Host "DeviceNr $nr -> $Location ($DeviceId)"
+}
+
 $DeployStatus = (-not $AccessToken) ? "development" : "production"
 
 # Git commit vor dem Deploy
@@ -57,7 +80,7 @@ $GitUrl = git -C $PSScriptRoot remote get-url origin
 
 # .env mit neuem Token, Location und Git-Infos aktualisieren
 if (-not $AccessToken) {
-    $AccessToken = Get-EnvValue "MQTT_ACCESS_TOKEN_DEV"
+    $AccessToken = $deployEnvRaw["DEVICE_AT_DEV"]
 }
 if ($DeviceId) {
     Set-EnvValue "DEPLOY_DEVICE_ID" $DeviceId
@@ -95,15 +118,16 @@ function Deploy-ViaMpremote {
 }
 
 function Resolve-DeviceId {
-    param([string]$Location, [hashtable]$Headers, [string]$BaseUrl)
+    param([string]$Location, [hashtable]$Headers, [string]$BaseUrl, [string]$DeviceInfoUrl, [string]$DeviceAttrPath)
 
     # Alle PicoData-Geraete abrufen
-    $resp = Invoke-RestMethod -Uri "$BaseUrl/api/tenant/deviceInfos?pageSize=100&page=0&sortProperty=name&sortOrder=ASC" `
+    $resp = Invoke-RestMethod -Uri $DeviceInfoUrl `
         -Headers $Headers -ErrorAction Stop
     $devices = $resp.data | Where-Object { $_.deviceProfileName -eq "PicoData" }
 
     foreach ($device in $devices) {
-        $attrs = Invoke-RestMethod -Uri "$BaseUrl/api/plugins/telemetry/DEVICE/$($device.id.id)/values/attributes/CLIENT_SCOPE" `
+        $attrUrl = $BaseUrl + ($DeviceAttrPath -f $device.id.id)
+        $attrs = Invoke-RestMethod -Uri $attrUrl `
             -Headers $Headers -ErrorAction SilentlyContinue
         $locationAttr = $attrs | Where-Object { $_.key -eq "location" }
         if ($locationAttr -and $locationAttr.value -eq $Location) {
@@ -128,20 +152,27 @@ function Deploy-ViaRpc {
     $envMap = @{}
     $deployEnv | ForEach-Object { $envMap[$_.Key] = $_.Value }
 
-    $rpcUrl   = $envMap["THINGSBOARD_RPC_URL"]
-    $loginUrl = $envMap["THINGSBOARD_LOGIN_URL"]
-    $tbUser   = $envMap["THINGSBOARD_USERNAME"]
+    $baseUrl      = $envMap["THINGSBOARD_BASE_URL"]
+    $loginUrl     = $baseUrl + $envMap["THINGSBOARD_LOGIN_PATH"]
+    $rpcPath      = $envMap["THINGSBOARD_RPC_PATH"]
+    $userUrl      = $baseUrl + $envMap["THINGSBOARD_USER_PATH"]
+    $verifyPath   = $envMap["THINGSBOARD_VERIFY_PATH"]
+    $deviceInfoUrl     = $baseUrl + $envMap["THINGSBOARD_DEVICE_INFO_PATH"]
+    $deviceAttrPath    = $envMap["THINGSBOARD_DEVICE_ATTRIBUTE_PATH"]
+    $tbUser       = $envMap["THINGSBOARD_USERNAME"]
 
-    if (-not $rpcUrl) {
-        Write-Error "THINGSBOARD_RPC_URL fehlt in .env"
+    if (-not $baseUrl) {
+        Write-Error "THINGSBOARD_BASE_URL fehlt in .env"
         return
     }
-    if (-not $loginUrl) {
-        Write-Error "THINGSBOARD_LOGIN_URL fehlt in .env"
+    if (-not $rpcPath) {
+        Write-Error "THINGSBOARD_RPC_PATH fehlt in .env"
         return
     }
-
-    $baseUrl = $rpcUrl -replace "/api/rpc/twoway/?$", ""
+    if (-not $envMap["THINGSBOARD_LOGIN_PATH"]) {
+        Write-Error "THINGSBOARD_LOGIN_PATH fehlt in .env"
+        return
+    }
 
     # JWT aus Cache laden (gespeichert in %TEMP%\tb_jwt_<user>.json)
     function Get-JwtExpiry([string]$token) {
@@ -168,7 +199,7 @@ function Deploy-ViaRpc {
             $headers = @{ Authorization = "Bearer $($cached.token)" }
             # Kurz pruefen ob Token noch akzeptiert wird
             try {
-                Invoke-RestMethod -Uri "$baseUrl/api/auth/user" -Headers $headers -ErrorAction Stop | Out-Null
+                Invoke-RestMethod -Uri $userUrl -Headers $headers -ErrorAction Stop | Out-Null
             } catch {
                 Write-Warning "Gecachtes Token abgelaufen – neu anmelden."
                 $headers = $null
@@ -201,7 +232,8 @@ function Deploy-ViaRpc {
         if ($login.scope -eq "PRE_VERIFICATION_TOKEN") {
             $totpCode = Read-Host "2FA-Code (TOTP)"
             try {
-                $mfaCheck = Invoke-RestMethod -Uri "$baseUrl/api/auth/2fa/verification/check?providerType=TOTP&verificationCode=$totpCode" `
+                $verifyUrl = $baseUrl + ($verifyPath -f $totpCode)
+                $mfaCheck = Invoke-RestMethod -Uri $verifyUrl `
                     -Method POST `
                     -Headers @{ Authorization = "Bearer $($login.token)" } `
                     -ErrorAction Stop
@@ -225,7 +257,7 @@ function Deploy-ViaRpc {
     # DeviceId per Location-Attribut nachschlagen, falls nicht angegeben
     if (-not $DeviceId) {
         Write-Host "Suche Geraet mit location='$Location'..."
-        $DeviceId = Resolve-DeviceId -Location $Location -Headers $headers -BaseUrl $baseUrl
+        $DeviceId = Resolve-DeviceId -Location $Location -Headers $headers -BaseUrl $baseUrl -DeviceInfoUrl $deviceInfoUrl -DeviceAttrPath $deviceAttrPath
         if (-not $DeviceId) {
             Write-Error "Kein PicoData-Geraet mit location='$Location' gefunden. Bitte -DeviceId angeben."
             return
@@ -233,14 +265,13 @@ function Deploy-ViaRpc {
     }
 
     # .py Dateien und .env per uploadFile RPC uebertragen
-    Write-Host "DEBUG RPC-URL: $rpcUrl$DeviceId"
-    Write-Host "DEBUG Auth-Header: $($headers.Authorization.Substring(0,30))..."
+    $rpcUrl = $baseUrl + ($rpcPath -f $DeviceId)
     $files = Get-ChildItem $SrcDir -File | Where-Object { $_.Extension -eq ".py" -or $_.Name -eq ".env" }
     foreach ($file in $files) {
         Write-Host "RPC uploadFile: $($file.Name)"
         $content = Get-Content $file.FullName -Raw
         $body = @{ method = "uploadFile"; params = @{ filename = $file.Name; content = $content }; timeout = 15000 } | ConvertTo-Json -Depth 5
-        Invoke-RestMethod -Uri "$rpcUrl$DeviceId" `
+        Invoke-RestMethod -Uri $rpcUrl `
             -Method POST -ContentType "application/json" `
             -Headers $headers -Body $body -ErrorAction Stop | Out-Null
     }
@@ -254,7 +285,7 @@ function Deploy-ViaRpc {
             Write-Host "RPC uploadFile: $relativePath"
             $content = Get-Content $file.FullName -Raw
             $body = @{ method = "uploadFile"; params = @{ filename = $relativePath; content = $content }; timeout = 15000 } | ConvertTo-Json -Depth 5
-            Invoke-RestMethod -Uri "$rpcUrl$DeviceId" `
+            Invoke-RestMethod -Uri $rpcUrl `
                 -Method POST -ContentType "application/json" `
                 -Headers $headers -Body $body -ErrorAction Stop | Out-Null
         }

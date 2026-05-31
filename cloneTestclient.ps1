@@ -41,6 +41,6 @@ Write-Host "Erstelle Testclient im Verzeichnis: $($targetDir.FullName)"
 Get-ChildItem -Path ".\testclient\" -Filter "*.py" -File | Copy-Item -Destination $targetDir.FullName
 Write-Host "Kopiere Skripte und Dateien..."
 
-Set-EnvValue "MQTT_ACCESS_TOKEN_DEV" $AccessToken
+Set-EnvValue "MQTT_ACCESS_TOKEN" $AccessToken
 
 $envContent | Set-Content (Join-Path $targetDir.FullName ".env")

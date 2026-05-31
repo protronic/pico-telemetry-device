@@ -95,6 +95,7 @@ try:
         'location':    get_env('DEPLOY_LOCATION'),
         'commit_hash': get_env('DEPLOY_COMMIT_HASH'),
         'git_url':     get_env('DEPLOY_GIT_URL'),
+        'wifi_ssid':   get_env('WIFI_SSID', ''),
         'test_client': False,
     })
 except Exception as e:

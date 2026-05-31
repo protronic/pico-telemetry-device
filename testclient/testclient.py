@@ -30,7 +30,7 @@ load_dotenv(env_path)
 
 BROKER = os.getenv('MQTT_BROKER')
 PORT   = int(os.getenv('MQTT_PORT', 1883))
-TOKEN  = os.getenv('MQTT_ACCESS_TOKEN_DEV')
+TOKEN  = os.getenv('MQTT_ACCESS_TOKEN')
 
 # ── Server-seitige RPCs (ThingsBoard → Client) ────────────────────────────────
 def rpc_handler(request_id, body):
@@ -116,6 +116,8 @@ tb.send_attributes({
     'test_client':    True,
     'location':       os.getenv('DEPLOY_LOCATION', 'testclient'),
     'commit_hash':    os.getenv('DEPLOY_COMMIT_HASH', ''),
+    'git_url':        os.getenv('DEPLOY_GIT_URL', ''),
+    'wifi_ssid':      os.getenv('WIFI_SSID', ''),
 })
 print('[Attr] Client-Attribute gesendet')
 
