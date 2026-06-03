@@ -112,7 +112,7 @@ $currentTag = $deployEnvRaw["SOFTWARE_VERSION"]
 $gitTag = $gitTag -gt $currentTag ? $currentTag : $gitTag
 $parts = $gitTag.split(".")
 $parts[2] = [string]([int]$parts[2] + 1)
-$gitTag = $parts -join "."
+$gitTag = $parts -join "." 
 
 # Git commit vor dem Deploy
 Write-Host "Committe Aenderungen..."
@@ -122,7 +122,7 @@ git -C $PSScriptRoot commit -m "force commit; deploy $Location" 2>&1 | Write-Hos
 # Git pull before committing, to minimize conflicts (especially when multiple developers work on the same repo)
 Write-Host "Git pull vor Deploy..."
 git -C $PSScriptRoot pull --rebase --tags 2>&1 | Write-Host
-git -C $PSScriptRoot tag $gitTag
+# git -C $PSScriptRoot tag $gitTag
 
 # Git push vor dem Deploy (inkl. Tags)
 git -C $PSScriptRoot push --follow-tags 2>&1 | Write-Host

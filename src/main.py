@@ -196,6 +196,7 @@ def _receive_time_mqtt():
         return _receive_time_http()
 
 def _receive_time_http():
+    response = None
     try:
         ## Ask for actual server time to keep rtc up to date
         response = ur.get(SERVER_URL)
@@ -204,7 +205,8 @@ def _receive_time_http():
         print(rtc.datetime(), "Error while getting Server-Time (HTTP): ", e)###
         timestamp = None
     finally:
-        response.close()
+        if response:
+            response.close()
     wdt.feed() # prevent wdt to restart the system
     if timestamp:
         try:
@@ -301,12 +303,12 @@ if isconnected:
     rtc_isupdated = receive_time()
 
     if secrets['per_dataacq']:
-        data_timer = machine.Timer(-1)
+        data_timer = machine.Timer(1)
         data_timer.init(period=interval, mode=machine.Timer.PERIODIC, callback=read_data)
     else:
-        data_timer = machine.Timer(-1)
+        data_timer = machine.Timer(1)
         data_timer.init(period=interval, mode=machine.Timer.ONE_SHOT, callback=read_data)
-    rtc_update_timer = machine.Timer(-1)
+    rtc_update_timer = machine.Timer(2)
     rtc_update_timer.init(period=2419200, mode=machine.Timer.PERIODIC, callback=update_rtc) # 28 days
 
     async def main_loop():
