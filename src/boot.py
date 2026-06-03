@@ -1,9 +1,15 @@
 # boot.py - Startet WLAN-Verbindung beim Booten
 # Für Raspberry Pi Pico 2 W mit MicroPython
 
+import sys
 import machine
 import network
 import time
+
+# Lib-Ordner zu sys.path hinzufuegen, damit MicroPython Module darin findet
+if '/Lib' not in sys.path:
+    sys.path.append('/Lib')
+
 from micro_dotenv import load_dotenv, get_env
 
 load_dotenv()  # Load environment variables from .env file
