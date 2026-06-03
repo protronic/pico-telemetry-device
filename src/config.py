@@ -27,6 +27,6 @@ secrets = {
     'interval': 5000,
     'server_url': 'https://database3.protronic-gmbh.de/query?database=PicoTelemetry',
     'server_url': 'http://10.19.28.29:3021/',
-    'use_wdt': True,
+    'use_wdt': False,
 }
 

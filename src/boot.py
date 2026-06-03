@@ -51,12 +51,12 @@ except Exception as e:
     machine.reset()
 
 
-try:
-    from thingsboard_sdk.tb_device_mqtt import TBDeviceMqttClient
+# try:
+#     from thingsboard_sdk.tb_device_mqtt import TBDeviceMqttClient
 
-    print("thingsboard-micropython-client-sdk package already installed.")
-except ImportError:
-    print("Installing thingsboard-micropython-client-sdk package...")
-    import mip
-    mip.install('github:thingsboard/thingsboard-micropython-client-sdk')
-    from thingsboard_sdk.tb_device_mqtt import TBDeviceMqttClient
+#     print("thingsboard-micropython-client-sdk package already installed.")
+# except ImportError:
+#     print("Installing thingsboard-micropython-client-sdk package...")
+#     import mip
+#     mip.install('github:thingsboard/thingsboard-micropython-client-sdk')
+#     from thingsboard_sdk.tb_device_mqtt import TBDeviceMqttClient

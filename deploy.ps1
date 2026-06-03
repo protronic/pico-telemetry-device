@@ -109,7 +109,7 @@ $DeployStatus = (-not $AccessToken) ? "development" : "production"
 $gitTag = (git tag -l)[-1]
 # Get current Tag from .env (if exists)
 $currentTag = $deployEnvRaw["SOFTWARE_VERSION"]
-$gitTag = $gitTag -lt $currentTag ? $currentTag : $gitTag
+$gitTag = $gitTag -gt $currentTag ? $currentTag : $gitTag
 $parts = $gitTag.split(".")
 $parts[2] = [string]([int]$parts[2] + 1)
 $gitTag = $parts -join "."
@@ -173,7 +173,7 @@ function Deploy-ViaScp {
         if ($LASTEXITCODE -ne 0) { Write-Error "SCP fehlgeschlagen fuer $($file.Name)"; return }
     }
 
-    $LibDir = Join-Path $SrcDir "Lib"
+    $LibDir = Join-Path $SrcDir "lib"
     if (Test-Path $LibDir) {
         $libFiles = Get-ChildItem $LibDir -Recurse -File
         foreach ($file in $libFiles) {
@@ -196,8 +196,8 @@ function Deploy-ViaMpremote {
         python -m mpremote cp "$($file.FullName)" ":$($file.Name)"
     }
 
-    # Lib Ordner rekursiv uebertragen (Struktur beibehalten)
-    $LibDir = Join-Path $SrcDir "Lib"
+    # lib Ordner rekursiv uebertragen (Struktur beibehalten)
+    $LibDir = Join-Path $SrcDir "lib"
     if (Test-Path $LibDir) {
         # Alle benoetigten Verzeichnisse sammeln und hierarchisch erstellen
         $dirs = [System.Collections.Generic.HashSet[string]]::new()
@@ -381,8 +381,8 @@ function Deploy-ViaRpc {
             -Headers $headers -Body $body -ErrorAction Stop | Out-Null
     }
 
-    # Lib Ordner rekursiv uebertragen
-    $LibDir = Join-Path $SrcDir "Lib"
+    # lib Ordner rekursiv uebertragen
+    $LibDir = Join-Path $SrcDir "lib"
     if (Test-Path $LibDir) {
         $libFiles = Get-ChildItem $LibDir -Recurse -File
         foreach ($file in $libFiles) {
