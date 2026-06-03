@@ -199,12 +199,24 @@ function Deploy-ViaMpremote {
     # Lib Ordner rekursiv uebertragen (Struktur beibehalten)
     $LibDir = Join-Path $SrcDir "Lib"
     if (Test-Path $LibDir) {
+        # Alle benoetigten Verzeichnisse sammeln und hierarchisch erstellen
+        $dirs = [System.Collections.Generic.HashSet[string]]::new()
         $libFiles = Get-ChildItem $LibDir -Recurse -File
         foreach ($file in $libFiles) {
             $relativePath = $file.FullName.Substring($SrcDir.Length + 1).Replace("\", "/")
-            $remoteDir = ":" + ($relativePath | Split-Path -Parent).Replace("\", "/")
+            $parts = ($relativePath | Split-Path -Parent).Replace("\", "/") -split "/"
+            for ($i = 0; $i -lt $parts.Length; $i++) {
+                $dirs.Add(($parts[0..$i] -join "/")) | Out-Null
+            }
+        }
+        # Verzeichnisse sortiert nach Tiefe erstellen
+        foreach ($dir in ($dirs | Sort-Object { ($_ -split "/").Count })) {
+            python -m mpremote mkdir ":$dir" 2>$null
+        }
+        # Dateien kopieren
+        foreach ($file in $libFiles) {
+            $relativePath = $file.FullName.Substring($SrcDir.Length + 1).Replace("\", "/")
             Write-Host "Kopiere: $relativePath"
-            python -m mpremote mkdir $remoteDir 2>$null
             python -m mpremote cp "$($file.FullName)" ":$relativePath"
         }
     }
