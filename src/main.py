@@ -91,6 +91,7 @@ tb_client.set_server_side_rpc_request_handler(rpc_handler)
 try:
     tb_client.connect()
     print('ThingsBoard MQTT connected')
+    time.sleep_ms(500)  # Allow connection to establish
     tb_client.send_attributes({
         'location':    get_env('DEPLOY_LOCATION'),
         'commit_hash': get_env('DEPLOY_COMMIT_HASH'),
@@ -101,6 +102,7 @@ try:
     })
 except Exception as e:
     print('ThingsBoard MQTT connect failed:', e)
+    tb_client = None  # Set to None if connection fails
 
 
 if secrets['use_wdt']:
@@ -161,6 +163,10 @@ def _receive_time_mqtt():
     ## Requests current server time from ThingsBoard via client-side RPC.
     ## Requires a ThingsBoard rule chain that handles 'getServerTime'
     ## and responds with {"ts": <unix_ms>}.
+    if tb_client is None:
+        print(rtc.datetime(), 'MQTT client not connected, falling back to HTTP')
+        return _receive_time_http()
+    
     _result = {}
 
     def _on_time_response(response, exception=None):
@@ -186,7 +192,8 @@ def _receive_time_mqtt():
         return True
     except Exception as e:
         print(rtc.datetime(), 'Error while getting Server-Time (MQTT): ', e)###
-        return False
+        print(rtc.datetime(), 'Falling back to HTTP time sync')
+        return _receive_time_http()
 
 def _receive_time_http():
     try:
@@ -294,12 +301,12 @@ if isconnected:
     rtc_isupdated = receive_time()
 
     if secrets['per_dataacq']:
-        data_timer = machine.Timer(1)
+        data_timer = machine.Timer(-1)
         data_timer.init(period=interval, mode=machine.Timer.PERIODIC, callback=read_data)
     else:
-        data_timer = machine.Timer(1)
+        data_timer = machine.Timer(-1)
         data_timer.init(period=interval, mode=machine.Timer.ONE_SHOT, callback=read_data)
-    rtc_update_timer = machine.Timer(2)
+    rtc_update_timer = machine.Timer(-1)
     rtc_update_timer.init(period=2419200, mode=machine.Timer.PERIODIC, callback=update_rtc) # 28 days
 
     async def main_loop():
