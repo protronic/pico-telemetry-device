@@ -11,6 +11,7 @@
 #           .\deploy.ps1 -n DEV -m RPC        (lookup via DEVICE_ID_DEV, DEVICE_AT_DEV, DEVICE_LOCATION_DEV)
 #           .\deploy.ps1 -n DEV -m RPC -UseTestClient  (deploy testclient/ instead of src/)
 #           .\deploy.ps1 -m scp -Target "pi@raspberrypi:/home/pi/app/"  (SCP deploy)
+#           .\deploy.ps1 -Commit                              (mit Git commit/pull/push)
 
 param(
     [Alias("l")]
@@ -26,7 +27,8 @@ param(
     [string]$DeviceNr = "",
     [Alias("t")]
     [string]$Target = "",
-    [switch]$UseTestClient
+    [switch]$UseTestClient,
+    [switch]$Commit
 )
 
 function Get-EnvValue {
@@ -105,30 +107,39 @@ if ($DeviceNr) {
 
 $DeployStatus = (-not $AccessToken) ? "development" : "production"
 
-# Get current Software Version from git tags:
-$gitTag = (git tag -l)[-1]
-# Get current Tag from .env (if exists)
-$currentTag = $deployEnvRaw["SOFTWARE_VERSION"]
-$gitTag = $gitTag -gt $currentTag ? $currentTag : $gitTag
-$parts = $gitTag.split(".")
-$parts[2] = [string]([int]$parts[2] + 1)
-$gitTag = $parts -join "." 
+if ($Commit) {
+    # Get current Software Version from git tags:
+    $gitTag = (git tag -l)[-1]
+    # Get current Tag from .env (if exists)
+    $currentTag = $deployEnvRaw["SOFTWARE_VERSION"]
+    $gitTag = $gitTag -gt $currentTag ? $currentTag : $gitTag
+    $parts = $gitTag.split(".")
+    $parts[2] = [string]([int]$parts[2] + 1)
+    $gitTag = $parts -join "."
 
-# Git commit vor dem Deploy
-Write-Host "Committe Aenderungen..."
-git -C $PSScriptRoot add -A
-git -C $PSScriptRoot commit -m "force commit; deploy $Location" 2>&1 | Write-Host
+    # Git commit vor dem Deploy
+    Write-Host "Committe Aenderungen..."
+    git -C $PSScriptRoot add -A
+    git -C $PSScriptRoot commit -m "force commit; deploy $Location" 2>&1 | Write-Host
 
-# Git pull before committing, to minimize conflicts (especially when multiple developers work on the same repo)
-Write-Host "Git pull vor Deploy..."
-git -C $PSScriptRoot pull --rebase --tags 2>&1 | Write-Host
-# git -C $PSScriptRoot tag $gitTag
+    # Git pull before committing, to minimize conflicts (especially when multiple developers work on the same repo)
+    Write-Host "Git pull vor Deploy..."
+    git -C $PSScriptRoot pull --rebase --tags 2>&1 | Write-Host
+    # git -C $PSScriptRoot tag $gitTag
 
-# Git push vor dem Deploy (inkl. Tags)
-git -C $PSScriptRoot push --follow-tags 2>&1 | Write-Host
+    # Git push vor dem Deploy (inkl. Tags)
+    git -C $PSScriptRoot push --follow-tags 2>&1 | Write-Host
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Hinweis: Nichts zu commiten oder commit fehlgeschlagen."
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Hinweis: Nichts zu commiten oder commit fehlgeschlagen."
+    }
+} else {
+    $gitTag = $deployEnvRaw["SOFTWARE_VERSION"]
+    if (-not $gitTag) {
+        $tags = @(git tag -l)
+        if ($tags.Count -gt 0) { $gitTag = $tags[-1] } else { $gitTag = "0.0.0" }
+    }
+    Write-Host "Git-Operationen uebersprungen (nutze -Commit zum Committen)."
 }
 
 # Git Infos auslesen
