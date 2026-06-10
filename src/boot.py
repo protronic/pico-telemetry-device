@@ -42,10 +42,10 @@ try:
     connect_wifi()
 except KeyboardInterrupt:
     print("WLAN-Verbindungsversuch manuell unterbrochen.")
-    if (get_env("DEPLOY_STATUS") == "development"):
-        exit()
-    else:
-        machine.reset()
+    # if (get_env("DEPLOY_STATUS") == "development"):
+    exit()
+    # else:
+    #     machine.reset()
 except Exception as e:
     print("Fehler bei WLAN-Setup:", e)
     machine.reset()

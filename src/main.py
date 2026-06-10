@@ -39,7 +39,7 @@ from micro_dotenv import load_dotenv, get_env
 load_dotenv()
 
 ## Sensor Konfiguration
-sens_id=secrets['sensor_id']
+sens_id=get_env('DEPLOY_LOCATION')
 ## Server Konfiguration
 SERVER_URL = secrets['server_url']
 PORT = secrets['server_port']
@@ -148,6 +148,15 @@ def send_data(tempC, hum, pres):
         print(rtc.datetime(), "Error while sending data: ", e)#################
     finally:
         s.close()
+
+    if tb_client is not None:
+        try:
+            del data_package['Messzeit']
+            del data_package['StandortID']
+            tb_client.send_telemetry(data_package)
+        except Exception as e:
+            print(rtc.datetime(), "Error while sending data to ThingsBoard: ", e)#################
+
     wdt.feed() # prevent wdt to restart the system
 
 def update_rtc(rtc_update_timer):
@@ -169,7 +178,7 @@ def _receive_time_mqtt():
     
     _result = {}
 
-    def _on_time_response(response, exception=None):
+    def _on_time_response(request_id, response, exception):
         if exception is None and isinstance(response, dict):
             ts_ms = response.get('ts') or response.get('serverTime')
             if ts_ms:
@@ -302,22 +311,37 @@ if isconnected:
     ## Ask for actual server time to keep rtc up to date
     rtc_isupdated = receive_time()
 
-    if secrets['per_dataacq']:
+    # Try to create timers - use hardware timers if available, otherwise virtual timers
+    try:
         data_timer = machine.Timer(1)
+    except ValueError:
+        data_timer = machine.Timer(-1)
+    
+    if secrets['per_dataacq']:
         data_timer.init(period=interval, mode=machine.Timer.PERIODIC, callback=read_data)
     else:
-        data_timer = machine.Timer(1)
         data_timer.init(period=interval, mode=machine.Timer.ONE_SHOT, callback=read_data)
-    rtc_update_timer = machine.Timer(2)
-    rtc_update_timer.init(period=2419200, mode=machine.Timer.PERIODIC, callback=update_rtc) # 28 days
+    
+    try:
+        rtc_update_timer = machine.Timer(2)
+    except ValueError:
+        rtc_update_timer = machine.Timer(-1)
+    
+    rtc_update_timer.init(period=2147483647, mode=machine.Timer.PERIODIC, callback=update_rtc) # ~24.8 days (max int32)
+
+    def shutdown(reason=''):
+        global running
+        rtc_update_timer.deinit()
+        data_timer.deinit()
+        running = False
+        if reason:
+            print(rtc.datetime(), reason)
 
     async def main_loop():
         global running
         while True:
             if rp2.bootsel_button():
-                rtc_update_timer.deinit()
-                data_timer.deinit()
-                running = False
+                shutdown('BOOTSEL gedrückt – Programm beendet.')
                 break
             else:
                 pass
@@ -333,7 +357,15 @@ if isconnected:
         await asyncio.gather(task_pulse, task_main_loop, task_mqtt)
 
     running = True
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        shutdown('Programm manuell unterbrochen (Ctrl+C).')
+        if tb_client is not None:
+            try:
+                tb_client.disconnect()
+            except Exception:
+                pass
 else:
     print(rtc.datetime(), 'Failed WLAN-Connection:', CYW43_ERROR_CODES.get(wlan_status, "Unknown error code."))
     time.sleep(.5)

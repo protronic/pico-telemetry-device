@@ -1,5 +1,5 @@
 {
-    "python.languageServer": "Pylance",
+    "python.languageServer": "None",
     "python.analysis.typeCheckingMode": "basic",
     "python.analysis.diagnosticSeverityOverrides": {
         "reportMissingModuleSource": "none"
@@ -17,5 +17,15 @@
             "envManager": "ms-python.python:venv",
             "packageManager": "ms-python.python:pip"
         }
+    ],
+    "cursorpyright.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none"
+    },
+    "cursorpyright.analysis.extraPaths": [
+        "src/Lib"
+    ],
+    "cursorpyright.analysis.typeCheckingMode": "basic",
+    "cursorpyright.analysis.typeshedPaths": [
+        ".venv/Lib/site-packages"
     ],
 }
