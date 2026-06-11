@@ -106,8 +106,8 @@ except Exception as e:
 
 
 if secrets['use_wdt']:
-    ## Enable the WDT with a timeout of 12s (1s is the minimum)
-    wdt = machine.WDT(timeout=12000)
+    ## Enable the WDT with a timeout of 8,3s (1s is the minimum)
+    wdt = machine.WDT(timeout=8388)
 else:
     ## Use dummy WDT for testing without hardware watchdog
     class _DummyWDT:

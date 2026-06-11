@@ -24,7 +24,7 @@ secrets = {
     'scl_pin': 21,
     'sda_pin': 20,
     'per_dataacq': True,
-    'interval': 10000,
+    'interval': 5000,
     'server_url': 'https://database3.protronic-gmbh.de/',
     # 'server_url': 'http://10.19.28.29:3021/query?database=PicoTelemetry',
     'use_wdt': True,
