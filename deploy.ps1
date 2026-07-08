@@ -11,6 +11,7 @@
 #           .\deploy.ps1 -n DEV -m RPC        (lookup via DEVICE_ID_DEV, DEVICE_AT_DEV, DEVICE_LOCATION_DEV)
 #           .\deploy.ps1 -n DEV -m RPC -UseTestClient  (deploy testclient/ instead of src/)
 #           .\deploy.ps1 -m scp -Target "pi@raspberrypi:/home/pi/app/"  (SCP deploy)
+#           .\deploy.ps1 -n DEV -m RPC -Reboot                (nach Deploy Geraet neu starten)
 #           .\deploy.ps1 -Commit                              (mit Git commit/pull/push)
 
 param(
@@ -28,7 +29,8 @@ param(
     [Alias("t")]
     [string]$Target = "",
     [switch]$UseTestClient,
-    [switch]$Commit
+    [switch]$Commit,
+    [switch]$Reboot
 )
 
 function Get-EnvValue {
@@ -404,6 +406,24 @@ function Deploy-ViaRpc {
             Invoke-RestMethod -Uri $rpcUrl `
                 -Method POST -ContentType "application/json" `
                 -Headers $headers -Body $body -ErrorAction Stop | Out-Null
+        }
+    }
+
+    # Optional: Geraet neu starten, damit die neuen Dateien geladen werden.
+    # Oneway-RPC (fire-and-forget): das Geraet resettet direkt nach dem Reply,
+    # ein twoway-Aufruf wuerde sonst auf eine Antwort warten, die der Reset kappt.
+    if ($Reboot) {
+        $onewayPath = $rpcPath -replace 'twoway', 'oneway'
+        $rebootUrl = $baseUrl + ($onewayPath -replace '%s', $DeviceId)
+        Write-Host "RPC reboot (oneway)..."
+        $body = @{ method = "reboot"; params = @{} } | ConvertTo-Json -Depth 5
+        try {
+            Invoke-RestMethod -Uri $rebootUrl `
+                -Method POST -ContentType "application/json" `
+                -Headers $headers -Body $body -ErrorAction Stop | Out-Null
+            Write-Host "Reboot-Befehl gesendet."
+        } catch {
+            Write-Warning "Reboot-Befehl fehlgeschlagen: $_"
         }
     }
 }
