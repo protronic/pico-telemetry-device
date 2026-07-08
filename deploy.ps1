@@ -12,6 +12,7 @@
 #           .\deploy.ps1 -n DEV -m RPC -UseTestClient  (deploy testclient/ instead of src/)
 #           .\deploy.ps1 -m scp -Target "pi@raspberrypi:/home/pi/app/"  (SCP deploy)
 #           .\deploy.ps1 -n DEV -m RPC -Reboot                (nach Deploy Geraet neu starten)
+#           .\deploy.ps1 -Reboot                              (mpremote-Deploy + Hard-Reset)
 #           .\deploy.ps1 -Commit                              (mit Git commit/pull/push)
 
 param(
@@ -232,6 +233,12 @@ function Deploy-ViaMpremote {
             Write-Host "Kopiere: $relativePath"
             python -m mpremote cp "$($file.FullName)" ":$relativePath"
         }
+    }
+
+    # Optional: Geraet neu starten (Hard-Reset), damit die neuen Dateien laufen.
+    if ($Reboot) {
+        Write-Host "mpremote reset..."
+        python -m mpremote reset
     }
 }
 
