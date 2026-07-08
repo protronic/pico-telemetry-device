@@ -134,6 +134,30 @@ def _flush_pending_rpc_replies():
         machine.reset()
 
 
+def _list_files(path='/', recursive=True, _acc=None):
+    if _acc is None:
+        _acc = []
+    try:
+        entries = os.ilistdir(path)
+    except OSError:
+        return _acc
+    for entry in entries:
+        name = entry[0]
+        typ = entry[1]
+        full = ('/' + name) if path == '/' else (path + '/' + name)
+        if typ & 0x4000:  # directory
+            if recursive:
+                _list_files(full, recursive, _acc)
+        else:
+            try:
+                size = entry[3] if len(entry) > 3 else os.stat(full)[6]
+            except (IndexError, OSError):
+                size = 0
+            _acc.append({'path': full, 'size': size})
+        wdt.feed()
+    return _acc
+
+
 def rpc_handler(request_id, request_body):
     if tb_client is None:
         return
@@ -192,6 +216,24 @@ def rpc_handler(request_id, request_body):
             })
         except OSError as e:
             _queue_rpc_reply(request_id, {'success': False, 'error': str(e)})
+        except Exception as e:
+            _queue_rpc_reply(request_id, {'success': False, 'error': str(e)})
+    elif method == 'listFiles':
+        path = params.get('path', '/') or '/'
+        recursive = params.get('recursive', True)
+        try:
+            files = _list_files(path, recursive)
+            wdt.feed()
+            # base64-encode the list so non-ASCII filenames can't desync the reply.
+            files_b64 = ubinascii.b2a_base64(json.dumps(files).encode()).decode().strip()
+            print(rtc.datetime(), f'RPC listFiles: {path} ({len(files)} files)')
+            _queue_rpc_reply(request_id, {
+                'success': True,
+                'path': path,
+                'count': len(files),
+                'encoding': 'base64',
+                'files_b64': files_b64,
+            })
         except Exception as e:
             _queue_rpc_reply(request_id, {'success': False, 'error': str(e)})
     elif method == 'reboot':
