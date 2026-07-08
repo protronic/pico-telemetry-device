@@ -22,6 +22,8 @@ sources
     https://randomnerdtutorials.com/raspberry-pi-pico-bme280-micropython/
 """
 import machine, rp2
+import os
+import ubinascii
 import utime as time
 import network
 import uasyncio as asyncio
@@ -56,6 +58,82 @@ bme = BME280.BME280(i2c=i2c, osmode=3)
 # osmode: Temperature oversampling (3 => x4)
 # BME280 default address (I2C0): BME280_I2CADDR = 0x76
 
+DOWNLOAD_CHUNK_SIZE = 256
+MAX_DOWNLOAD_CHUNK_BYTES = 256
+_pending_rpc_replies = []
+_pending_telemetry = []
+MAX_PENDING_TELEMETRY = 20
+_pending_reboot = False
+
+
+def _mqtt_disconnect():
+    if tb_client is None or tb_client._client is None:
+        return
+    tb_client.connected = False
+    try:
+        if tb_client._client.sock is not None:
+            tb_client._client.disconnect()
+    except Exception:
+        pass
+    tb_client._client.sock = None
+
+
+def _mqtt_reconnect():
+    if tb_client is None:
+        return False
+    _mqtt_disconnect()
+    try:
+        tb_client.connect()
+        if tb_client.connected:
+            print(rtc.datetime(), 'ThingsBoard MQTT reconnected')
+            time.sleep_ms(300)
+            return True
+    except Exception as e:
+        print(rtc.datetime(), 'MQTT reconnect failed:', e)
+    return False
+
+
+def _queue_rpc_reply(request_id, response):
+    _pending_rpc_replies.append((request_id, response))
+
+
+def _flush_pending_telemetry():
+    if tb_client is None or not _pending_telemetry:
+        return
+    while _pending_telemetry:
+        data = _pending_telemetry[0]
+        try:
+            wdt.feed()
+            tb_client.send_telemetry(data)
+            _pending_telemetry.pop(0)
+        except Exception as e:
+            print(rtc.datetime(), 'Telemetry send failed:', e)
+            _mqtt_disconnect()
+            _mqtt_reconnect()
+            return
+
+
+def _flush_pending_rpc_replies():
+    global _pending_reboot
+    if tb_client is None or not _pending_rpc_replies:
+        return
+    while _pending_rpc_replies:
+        request_id, response = _pending_rpc_replies.pop(0)
+        try:
+            wdt.feed()
+            tb_client.send_rpc_reply(request_id, response)
+        except Exception as e:
+            print(rtc.datetime(), 'RPC reply failed:', e)
+            _pending_rpc_replies.insert(0, (request_id, response))
+            _mqtt_disconnect()
+            _mqtt_reconnect()
+            return
+    if _pending_reboot:
+        _pending_reboot = False
+        time.sleep_ms(500)
+        machine.reset()
+
+
 def rpc_handler(request_id, request_body):
     if tb_client is None:
         return
@@ -70,19 +148,56 @@ def rpc_handler(request_id, request_body):
         filename = params.get('filename', '')
         content  = params.get('content', '')
         if not filename:
-            tb_client.send_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
+            _queue_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
             return
         try:
             with open(filename, 'w') as f:
                 f.write(content)
             print(rtc.datetime(), f'RPC uploadFile: {filename} written ({len(content)} bytes)')
-            tb_client.send_rpc_reply(request_id, {'success': True, 'filename': filename})
+            _queue_rpc_reply(request_id, {'success': True, 'filename': filename})
         except Exception as e:
-            tb_client.send_rpc_reply(request_id, {'success': False, 'error': str(e)})
+            _queue_rpc_reply(request_id, {'success': False, 'error': str(e)})
+    elif method == 'downloadFile':
+        filename = params.get('filename', '')
+        if not filename:
+            _queue_rpc_reply(request_id, {'success': False, 'error': 'No filename'})
+            return
+        try:
+            file_size = os.stat(filename)[6]
+            offset = int(params.get('offset', 0))
+            chunk_size = int(params.get('chunk_size', DOWNLOAD_CHUNK_SIZE))
+            chunk_size = min(max(chunk_size, 1), MAX_DOWNLOAD_CHUNK_BYTES)
+            if offset < 0 or offset > file_size:
+                _queue_rpc_reply(request_id, {'success': False, 'error': 'Invalid offset'})
+                return
+            with open(filename, 'rb') as f:
+                if offset:
+                    f.seek(offset)
+                raw = f.read(chunk_size)
+            wdt.feed()
+            next_offset = offset + len(raw)
+            eof = next_offset >= file_size
+            # base64 so binary/non-ASCII content survives JSON + MQTT intact.
+            content_b64 = ubinascii.b2a_base64(raw).decode().strip()
+            print(rtc.datetime(), f'RPC downloadFile: {filename} chunk {offset}-{next_offset}/{file_size}')
+            _queue_rpc_reply(request_id, {
+                'success': True,
+                'filename': filename,
+                'content': content_b64,
+                'encoding': 'base64',
+                'offset': offset,
+                'next_offset': next_offset,
+                'size': file_size,
+                'eof': eof,
+            })
+        except OSError as e:
+            _queue_rpc_reply(request_id, {'success': False, 'error': str(e)})
+        except Exception as e:
+            _queue_rpc_reply(request_id, {'success': False, 'error': str(e)})
     elif method == 'reboot':
-        tb_client.send_rpc_reply(request_id, {'success': True})
-        time.sleep_ms(500)
-        machine.reset()
+        _queue_rpc_reply(request_id, {'success': True})
+        global _pending_reboot
+        _pending_reboot = True
 
 
 ## Connect to ThingsBoard via MQTT
@@ -150,12 +265,14 @@ def send_data(tempC, hum, pres):
         s.close()
 
     if tb_client is not None:
-        try:
-            del data_package['Messzeit']
-            del data_package['StandortID']
-            tb_client.send_telemetry(data_package)
-        except Exception as e:
-            print(rtc.datetime(), "Error while sending data to ThingsBoard: ", e)#################
+        # Runs in a Timer callback: only queue telemetry. All MQTT socket
+        # access happens in mqtt_task to avoid interleaved writes that corrupt
+        # the MQTT stream and drop the connection.
+        del data_package['Messzeit']
+        del data_package['StandortID']
+        _pending_telemetry.append(data_package)
+        if len(_pending_telemetry) > MAX_PENDING_TELEMETRY:
+            _pending_telemetry.pop(0)
 
     wdt.feed() # prevent wdt to restart the system
 
@@ -281,11 +398,20 @@ async def pulse_led():
 async def mqtt_task():
     global running
     while running:
-        try:
-            if tb_client is not None:
-                tb_client.check_for_msg()
-        except Exception as e:
-            print(rtc.datetime(), 'MQTT error:', e)
+        if tb_client is not None:
+            if not tb_client.connected:
+                _mqtt_reconnect()
+            else:
+                try:
+                    tb_client.check_for_msg()
+                    if _pending_rpc_replies:
+                        await asyncio.sleep_ms(50)
+                        _flush_pending_rpc_replies()
+                    if _pending_telemetry:
+                        _flush_pending_telemetry()
+                except OSError as e:
+                    print(rtc.datetime(), 'MQTT error:', e)
+                    _mqtt_reconnect()
         await asyncio.sleep_ms(200)
 ''' Error JSON:
     error_transmission = {"time": rtc.datetime(),

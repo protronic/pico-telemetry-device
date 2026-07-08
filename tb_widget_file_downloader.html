@@ -1,0 +1,373 @@
+<!--
+================================================================================
+  ThingsBoard Custom Control Widget – Pico File Downloader
+================================================================================
+
+  Anleitung:
+  1.  ThingsBoard öffnen → Widget Library → "+ Widget bundle" oder vorhandenes Bundle
+  2.  "+ Widget" → Typ: "Control widget"
+  3.  Den Inhalt der Tabs wie folgt befüllen:
+
+      [ HTML ]      → Abschnitt "HTML TEMPLATE" unten
+      [ JavaScript ]→ Abschnitt "JAVASCRIPT" unten
+      [ CSS ]       → Abschnitt "CSS" unten (optional)
+      [ Resources ] → leer lassen
+
+  4.  Widget auf ein Dashboard ziehen
+      → Kein Zielgerät / Entitätsalias nötig — das Widget lädt alle Geräte
+        mit dem Profil "PicoData" automatisch aus der ThingsBoard-API und
+        zeigt sie im Dropdown an.
+      → Der angemeldete Nutzer benötigt Lesezugriff auf Geräteinformationen
+        sowie Schreibzugriff für Server-seitige RPCs (Tenant-Admin oder
+        entsprechende Rolle).
+
+  Geräte-Dropdown:
+      - Beim Start werden alle Geräte mit Profil "PicoData" geladen
+        (max. 100, alphabetisch sortiert).
+      - Der ↻-Button aktualisiert die Liste (z. B. nach Hinzufügen eines Geräts).
+
+  Unterstützte RPCs:
+      - downloadFile  { filename, offset?, chunk_size? }  → Datei vom Pico lesen (chunked)
+================================================================================
+-->
+
+<!-- ══════════════════════════════════════════════════════ HTML TEMPLATE ══ -->
+<div id="pico-downloader">
+
+  <div class="row">
+    <label>Zielgerät</label>
+    <select id="pd-device"><option value="">-- Lade Geräte… --</option></select>
+    <button id="pd-refresh" class="tb-btn" title="Geräteliste neu laden">↻</button>
+  </div>
+
+  <div class="row">
+    <label>Dateiname</label>
+    <select id="pd-select">
+      <option value="main.py">main.py</option>
+      <option value="boot.py">boot.py</option>
+      <option value="config.py">config.py</option>
+      <option value=".env">.env</option>
+      <option value="__custom__">-- eigener Name --</option>
+    </select>
+    <input id="pd-custom" type="text" placeholder="dateiname.py" style="display:none;">
+  </div>
+
+  <div class="row actions">
+    <button id="pd-download" class="tb-btn primary">&#8595; Vom Pico laden</button>
+    <button id="pd-save" class="tb-btn" disabled>&#128190; Auf PC speichern</button>
+  </div>
+
+  <div class="row editor-row">
+    <label>Inhalt</label>
+    <textarea id="pd-editor" spellcheck="false" readonly placeholder="Datei vom Pico laden…"></textarea>
+  </div>
+
+  <div id="pd-status" class="status"></div>
+
+</div>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+
+<!-- ══════════════════════════════════════════════════════════ JAVASCRIPT ══
+     (Diesen Abschnitt in den "JavaScript"-Tab des Widget-Editors kopieren)
+═══════════════════════════════════════════════════════════════════════════ -->
+<script id="JAVASCRIPT_TAB_CONTENT" type="text/plain">
+
+self.onInit = function () {
+
+    var deviceSel  = document.getElementById('pd-device');
+    var refreshBtn = document.getElementById('pd-refresh');
+    var sel        = document.getElementById('pd-select');
+    var custom     = document.getElementById('pd-custom');
+    var editor     = document.getElementById('pd-editor');
+    var downloadBtn= document.getElementById('pd-download');
+    var saveBtn    = document.getElementById('pd-save');
+    var status     = document.getElementById('pd-status');
+
+    var lastFilename = '';
+    var lastContent  = '';
+    var lastBytes    = null;
+    var CHUNK_SIZE   = 256;
+
+    // ── Hilfsfunktionen ──────────────────────────────────────────────────
+
+    function b64ToBytes(b64) {
+        var bin = atob(b64 || '');
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) {
+            bytes[i] = bin.charCodeAt(i);
+        }
+        return bytes;
+    }
+
+    function concatChunks(chunks) {
+        var total = 0;
+        chunks.forEach(function (c) { total += c.length; });
+        var out = new Uint8Array(total);
+        var pos = 0;
+        chunks.forEach(function (c) { out.set(c, pos); pos += c.length; });
+        return out;
+    }
+
+    function setStatus(msg, type) {
+        status.textContent = msg;
+        status.className = 'status ' + (type || '');
+    }
+
+    function getFilename() {
+        if (sel.value === '__custom__') {
+            return custom.value.trim();
+        }
+        return sel.value;
+    }
+
+    // ── Geräteliste laden (gefiltert auf PicoData-Profil) ────────────────
+
+    function loadDevices() {
+        deviceSel.innerHTML = '<option value="">-- Lade Geräte… --</option>';
+        deviceSel.disabled = true;
+
+        self.ctx.http.get(
+            '/api/tenant/deviceInfos?pageSize=100&page=0&sortProperty=name&sortOrder=ASC'
+        ).subscribe(
+            function (resp) {
+                var devices = (resp.data || []).filter(function (d) {
+                    return d.deviceProfileName === 'PicoData';
+                });
+                deviceSel.innerHTML = '';
+                if (devices.length === 0) {
+                    deviceSel.innerHTML = '<option value="">Keine PicoData-Geräte gefunden</option>';
+                    deviceSel.disabled = true;
+                    return;
+                }
+                devices.forEach(function (d) {
+                    var opt = document.createElement('option');
+                    opt.value = d.id.id;
+                    opt.textContent = d.name;
+                    deviceSel.appendChild(opt);
+                });
+                deviceSel.disabled = false;
+            },
+            function () {
+                deviceSel.innerHTML = '<option value="">Fehler beim Laden der Geräte</option>';
+                deviceSel.disabled = true;
+            }
+        );
+    }
+
+    refreshBtn.addEventListener('click', loadDevices);
+    loadDevices();
+
+    // ── Dateiname-Dropdown ───────────────────────────────────────────────
+
+    sel.addEventListener('change', function () {
+        custom.style.display = (sel.value === '__custom__') ? 'inline-block' : 'none';
+    });
+
+    // ── Datei vom Pico laden (RPC: downloadFile, chunked) ──────────────
+
+    function downloadChunk(deviceId, filename, offset, parts, retries) {
+        retries = retries || 0;
+        self.ctx.http.post(
+            '/api/rpc/twoway/' + deviceId,
+            {
+                method: 'downloadFile',
+                params: { filename: filename, offset: offset, chunk_size: CHUNK_SIZE },
+                timeout: 30000
+            }
+        ).subscribe(
+            function (response) {
+                if (!response || !response.success) {
+                    downloadBtn.disabled = false;
+                    var err = (response && response.error) ? response.error : 'Unbekannter Fehler';
+                    setStatus('✗ Fehler: ' + err, 'error');
+                    return;
+                }
+                var bytes = (response.encoding === 'base64')
+                    ? b64ToBytes(response.content)
+                    : b64ToBytes(btoa(response.content || ''));
+                parts.push(bytes);
+                var total = response.size || 0;
+                var nextOffset = (response.next_offset != null)
+                    ? response.next_offset
+                    : response.offset + bytes.length;
+                if (!response.eof && bytes.length > 0 && nextOffset < total) {
+                    var pct = total ? Math.round(100 * nextOffset / total) : 0;
+                    setStatus('Lade ' + filename + ' … ' + pct + '% (' + nextOffset + '/' + total + ' Bytes)', 'info');
+                    setTimeout(function () {
+                        downloadChunk(deviceId, filename, nextOffset, parts, 0);
+                    }, 600);
+                    return;
+                }
+                downloadBtn.disabled = false;
+                lastFilename = response.filename || filename;
+                lastBytes    = concatChunks(parts);
+                lastContent  = new TextDecoder('utf-8').decode(lastBytes);
+                editor.value = lastContent;
+                saveBtn.disabled = lastBytes.length === 0;
+                setStatus('✓ ' + lastFilename + ' geladen (' + lastBytes.length + ' Bytes).', 'ok');
+            },
+            function (error) {
+                if (retries < 2) {
+                    setStatus('Chunk bei Offset ' + offset + ' fehlgeschlagen, Wiederholung …', 'info');
+                    setTimeout(function () {
+                        downloadChunk(deviceId, filename, offset, parts, retries + 1);
+                    }, 1500);
+                    return;
+                }
+                downloadBtn.disabled = false;
+                setStatus('✗ RPC-Fehler: ' + (error.message || error), 'error');
+            }
+        );
+    }
+
+    downloadBtn.addEventListener('click', function () {
+        var deviceId = deviceSel.value;
+        var filename = getFilename();
+
+        if (!deviceId) {
+            setStatus('Bitte Zielgerät auswählen.', 'error');
+            return;
+        }
+        if (!filename) {
+            setStatus('Bitte Dateinamen angeben.', 'error');
+            return;
+        }
+
+        setStatus('Lade ' + filename + ' von ' + deviceSel.options[deviceSel.selectedIndex].text + ' …', 'info');
+        downloadBtn.disabled = true;
+        saveBtn.disabled = true;
+        editor.value = '';
+        lastBytes = null;
+        lastContent = '';
+
+        downloadChunk(deviceId, filename, 0, []);
+    });
+
+    // ── Geladene Datei auf PC speichern ────────────────────────────────────
+
+    saveBtn.addEventListener('click', function () {
+        if (!lastBytes || lastBytes.length === 0) {
+            setStatus('Kein Inhalt zum Speichern.', 'error');
+            return;
+        }
+        var blob = new Blob([lastBytes], { type: 'application/octet-stream' });
+        var url  = URL.createObjectURL(blob);
+        var a    = document.createElement('a');
+        a.href = url;
+        a.download = lastFilename || 'download.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setStatus('✓ ' + (lastFilename || 'download.txt') + ' auf PC gespeichert.', 'ok');
+    });
+};
+
+self.onDestroy = function () {};
+
+</script>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+
+
+<!-- ══════════════════════════════════════════════════════════════════ CSS ══
+     (Diesen Abschnitt in den "CSS"-Tab des Widget-Editors kopieren)
+═══════════════════════════════════════════════════════════════════════════ -->
+<style id="CSS_TAB_CONTENT" type="text/plain">
+
+#pico-downloader {
+    padding: 12px;
+    font-family: Roboto, sans-serif;
+    font-size: 13px;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.row label {
+    min-width: 90px;
+    padding-top: 4px;
+    font-weight: 500;
+    color: #555;
+}
+
+.editor-row {
+    flex: 1;
+    min-height: 0;
+}
+
+#pd-select {
+    flex: 1;
+}
+
+#pd-device {
+    flex: 1;
+}
+
+#pd-refresh {
+    padding: 4px 10px;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+#pd-custom {
+    flex: 1;
+}
+
+#pd-editor {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 12px;
+    resize: none;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 8px;
+    box-sizing: border-box;
+    background: #fafafa;
+}
+
+.actions {
+    gap: 8px;
+    margin-left: 98px;
+}
+
+.tb-btn {
+    padding: 6px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    background: #e0e0e0;
+    color: #333;
+}
+
+.tb-btn.primary  { background: #305680; color: white; }
+.tb-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status {
+    margin-left: 98px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    min-height: 24px;
+    font-size: 12px;
+}
+
+.status.ok    { background: #e8f5e9; color: #2e7d32; }
+.status.error { background: #ffebee; color: #c62828; }
+.status.info  { background: #e3f2fd; color: #1565c0; }
+
+</style>
+<!-- ════════════════════════════════════════════════════════════════════════ -->
